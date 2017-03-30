@@ -10,16 +10,13 @@ mod timeout;
 use std::marker;
 use std::mem;
 use std::ptr;
-use std::thread;
 use std::time::Instant;
 
-use futures::Future;
 use libc::{c_int, c_uint};
 
 pub use timeout::*;
 
 const FALSE: c_int = 0;
-const TRUE: c_int = !FALSE;
 
 struct MyDrop<T> { inner: Option<T> }
 
@@ -149,7 +146,7 @@ pub struct Source<T> {
 }
 
 struct Inner<T> {
-    gsource: glib_sys::GSource,
+    _gsource: glib_sys::GSource,
     funcs: Box<glib_sys::GSourceFuncs>,
     data: T,
 }
@@ -238,9 +235,7 @@ impl<T> Drop for Source<T> {
     }
 }
 
-trait SourceFuncs
-    where Self: Sized
-{
+pub trait SourceFuncs: Sized {
     fn prepare(&self, source: &Source<Self>, timeout: &mut c_int) -> bool;
     fn check(&self, source: &Source<Self>) -> bool;
     fn dispatch<F: FnMut() -> bool>(&self, source: &Source<Self>, callback: F) -> bool;

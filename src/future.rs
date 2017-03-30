@@ -42,17 +42,19 @@ impl FuncHandle {
 }
 
 impl SourceFuncs for Inner {
-    fn prepare(&self, source: &Source<Self>, timeout: &mut c_int) -> bool {
+    fn prepare(&self, _source: &Source<Self>, _timeout: &mut c_int) -> bool {
         false
     }
 
-    fn check(&self, source: &Source<Self>) -> bool {
+    fn check(&self, _source: &Source<Self>) -> bool {
         let mut pending = self.pending.borrow_mut();
         *pending = self.ready_queue.drain().peekable();
         pending.peek().is_some()
     }
 
-    fn dispatch<F: FnMut() -> bool>(&self, source: &Source<Self>, callback: F) -> bool {
+    fn dispatch<F: FnMut() -> bool>(&self,
+                                    source: &Source<Self>,
+                                    _callback: F) -> bool {
         for index in self.pending.borrow_mut().by_ref() {
             let unpark = Arc::new(MyUnpark {
                 id: index,
