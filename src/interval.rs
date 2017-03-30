@@ -17,6 +17,7 @@ pub struct Interval {
 
 impl Interval {
     pub fn new(duration: Duration) -> Self {
+        assert_initialized_main_thread!();
         let (tx, rx) = mpsc::channel(0);
         let tx = Box::into_raw(Box::new(spawn(tx)));
         let id = unsafe { g_timeout_add_full(glib_sys::G_PRIORITY_DEFAULT, millis(duration) as u32, Some(handler),

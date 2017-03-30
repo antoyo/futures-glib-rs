@@ -7,6 +7,8 @@ use futures::Stream;
 use futures_glib::{Interval, MainContext, MainLoop, Executor};
 
 fn main() {
+    futures_glib::init();
+
     let cx = MainContext::default(|cx| cx.clone());
     let lp = MainLoop::new(None);
 

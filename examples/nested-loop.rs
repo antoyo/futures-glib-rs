@@ -9,6 +9,7 @@ use futures_glib::{Interval, MainContext, Executor};
 use gtk::{Continue, timeout_add};
 
 fn main() {
+    futures_glib::init();
     gtk::init().unwrap();
 
     let cx = MainContext::default(|cx| cx.clone());

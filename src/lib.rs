@@ -5,10 +5,10 @@ extern crate glib_sys;
 extern crate libc;
 extern crate slab;
 
-mod future;
-mod interval;
 #[macro_use]
 mod rt;
+mod future;
+mod interval;
 mod stack;
 mod timeout;
 mod utils;
