@@ -3,13 +3,16 @@ use std::iter::Peekable;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
-use futures::{Future, Async};
+use futures::{Async, Future, IntoFuture};
 use futures::executor::{Spawn, Unpark, spawn};
+use futures::sync::mpsc;
 use libc::c_uint;
 use slab::Slab;
 
 use super::{MainContext, Source, SourceFuncs};
 use stack::{Drain, Stack};
+
+use self::Message::*;
 
 /// A handle through which futures can be executed.
 ///
@@ -34,7 +37,16 @@ impl Executor {
     ///
     /// This is required to be called for futures to be completed.
     pub fn attach(&self, cx: &MainContext) -> c_uint {
+        cx.wakeup();
         self.source.attach(cx)
+    }
+
+    /// Generates a remote handle to this event loop which can be used to spawn tasks from other threads into this event loop.
+    pub fn remote(&self) -> Remote {
+        let inner = self.source.get_ref();
+        Remote {
+            tx: inner.tx.clone(),
+        }
     }
 
     /// Spawns a new future onto the event loop that this source is associated
@@ -48,21 +60,7 @@ impl Executor {
     /// function is called above.
     pub fn spawn<F: Future<Item=(), Error=()> + 'static>(&self, future: F) {
         let inner = self.source.get_ref();
-        let mut queue = inner.queue.borrow_mut();
-        if queue.vacant_entry().is_none() {
-            let len = queue.len();
-            queue.reserve_exact(len);
-        }
-        let entry = queue.vacant_entry().unwrap();
-        let index = entry.index();
-        entry.insert(Task {
-            unpark: None,
-            future: Some(spawn(Box::new(future))),
-        });
-        inner.ready_queue.push(index);
-        if let Some(context) = self.source.context() {
-            context.wakeup();
-        }
+        inner.spawn(future, &self.source);
     }
 }
 
@@ -83,6 +81,9 @@ impl SourceFuncs for Inner {
                                     _callback: F) -> bool {
         let cx = source.context().expect("no context in dispatch");
         for index in self.pending.borrow_mut().by_ref() {
+            if index == self.id {
+                continue;
+            }
             let (task, wake) = {
                 let mut queue = self.queue.borrow_mut();
                 let slot = &mut queue[index];
@@ -107,14 +108,37 @@ impl SourceFuncs for Inner {
                 Err(()) => { queue.remove(index).unwrap(); }
             }
         }
+        loop {
+            let wake = {
+                let mut queue = self.queue.borrow_mut();
+                let slot = &mut queue[self.id];
+                if slot.unpark.is_none() {
+                    slot.unpark = Some(Arc::new(MyUnpark {
+                        id: self.id,
+                        ready_queue: Arc::downgrade(&self.ready_queue),
+                        main_context: cx.clone(),
+                    }));
+                }
+                slot.unpark.as_ref().unwrap().clone()
+            };
+            if let Ok(Async::Ready(Some(Run(r)))) = (*self.message_queue.borrow_mut()).poll_stream(wake) {
+                r.call_box(source);
+            }
+            else {
+                break;
+            }
+        }
         true
     }
 }
 
 struct Inner {
+    id: usize,
     queue: RefCell<Slab<Task>>,
     pending: RefCell<Peekable<Drain<usize>>>,
     ready_queue: Arc<Stack<usize>>,
+    message_queue: RefCell<Spawn<mpsc::UnboundedReceiver<Message>>>,
+    tx: mpsc::UnboundedSender<Message>,
 }
 
 struct Task {
@@ -124,10 +148,44 @@ struct Task {
 
 impl Inner {
     fn new() -> Self {
+        let (tx, rx) = mpsc::unbounded();
+        let mut queue = Slab::with_capacity(128);
+        let id = {
+            let entry = queue.vacant_entry().unwrap();
+            let index = entry.index();
+            entry.insert(Task {
+                unpark: None,
+                future: None,
+            });
+            index
+        };
+        let ready_queue = Stack::new();
+        ready_queue.push(id);
         Inner {
-            queue: RefCell::new(Slab::with_capacity(128)),
+            id: id,
+            queue: RefCell::new(queue),
             pending: RefCell::new(Stack::new().drain().peekable()),
-            ready_queue: Arc::new(Stack::new()),
+            ready_queue: Arc::new(ready_queue),
+            message_queue: RefCell::new(spawn(rx)),
+            tx: tx,
+        }
+    }
+
+    fn spawn<F: Future<Item=(), Error=()> + 'static>(&self, future: F, source: &Source<Inner>) {
+        let mut queue = self.queue.borrow_mut();
+        if queue.vacant_entry().is_none() {
+            let len = queue.len();
+            queue.reserve_exact(len);
+        }
+        let entry = queue.vacant_entry().unwrap();
+        let index = entry.index();
+        entry.insert(Task {
+            unpark: None,
+            future: Some(spawn(Box::new(future))),
+        });
+        self.ready_queue.push(index);
+        if let Some(context) = source.context() {
+            context.wakeup();
         }
     }
 }
@@ -144,5 +202,48 @@ impl Unpark for MyUnpark {
             queue.push(self.id);
             self.main_context.wakeup();
         }
+    }
+}
+
+/// Handle to an event loop, used to construct I/O objects, send messages, and otherwise interact indirectly with the event loop itself.
+///
+/// Handles can be cloned, and when cloned they will still refer to the same underlying event loop.
+#[derive(Clone)]
+pub struct Remote {
+    tx: mpsc::UnboundedSender<Message>,
+}
+
+impl Remote {
+    /// Spawns a new future into the event loop this remote is associated with.
+    ///
+    /// This function takes a closure which is executed within the context of the I/O loop itself. The future returned by the closure will be scheduled on the event loop an run to completion.
+    ///
+    /// Note that while the closure, F, requires the Send bound as it might cross threads, the future R does not.
+    pub fn spawn<F, R>(&self, f: F)
+        where F: FnOnce(Executor) -> R + Send + 'static,
+              R: IntoFuture<Item=(), Error=()>,
+              R::Future: 'static
+    {
+        self.tx.send(Run(Box::new(|source: &Source<Inner>| {
+            let inner = source.get_ref();
+            let f = f(Executor {
+                source: source.clone(),
+            });
+            inner.spawn(f.into_future(), source);
+        }))).unwrap();
+    }
+}
+
+enum Message {
+    Run(Box<FnBox>),
+}
+
+trait FnBox: Send + 'static {
+    fn call_box(self: Box<Self>, source: &Source<Inner>);
+}
+
+impl<F: FnOnce(&Source<Inner>) + Send + 'static> FnBox for F {
+    fn call_box(self: Box<Self>, source: &Source<Inner>) {
+        (*self)(source)
     }
 }

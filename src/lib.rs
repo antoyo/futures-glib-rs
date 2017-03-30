@@ -22,7 +22,7 @@ use std::time::{Duration, Instant};
 
 use libc::{c_int, c_uint};
 
-pub use future::Executor;
+pub use future::{Executor, Remote};
 pub use interval::Interval;
 pub use rt::init;
 pub use timeout::Timeout;
