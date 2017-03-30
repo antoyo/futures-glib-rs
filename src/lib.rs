@@ -389,9 +389,19 @@ impl<T: SourceFuncs> Source<T> {
 
     /// Adds a `Source` to a context so that it will be executed within that
     /// context.
-    pub fn attach(&self, context: &MainContext) -> c_uint {
+    pub fn attach(&self, context: &MainContext) {
         // NOTE: this is not thread-safe
-        unsafe { glib_sys::g_source_attach(self.inner, context.inner) }
+        unsafe { glib_sys::g_source_attach(self.inner, context.inner); }
+    }
+
+    /// Removes a source from its `MainContext`, if any, and mark it as
+    /// destroyed.
+    ///
+    /// The source cannot be subsequently added to another context.  It is safe
+    /// to call this on sources which have already been removed from their
+    /// context.
+    pub fn destroy(&self) {
+        unsafe { glib_sys::g_source_destroy(self.inner) }
     }
 
     /// Sets the priority of a source.

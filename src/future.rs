@@ -5,7 +5,6 @@ use std::time::Duration;
 
 use futures::{Future, Async};
 use futures::executor::{Spawn, Unpark, spawn};
-use libc::c_uint;
 use slab::Slab;
 
 use super::{MainContext, Source, SourceFuncs};
@@ -33,8 +32,13 @@ impl Executor {
     /// assigned.
     ///
     /// This is required to be called for futures to be completed.
-    pub fn attach(&self, cx: &MainContext) -> c_uint {
+    pub fn attach(&self, cx: &MainContext) {
         self.source.attach(cx)
+    }
+
+    /// Unregister this executor and free up internal resources.
+    pub fn destroy(&self) {
+        self.source.destroy()
     }
 
     /// Spawns a new future onto the event loop that this source is associated
