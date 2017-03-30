@@ -3,7 +3,8 @@ use std::iter::Peekable;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
-use futures::{Future, Async};
+use futures::{Future, IntoFuture, Async};
+use futures::future;
 use futures::executor::{Spawn, Unpark, spawn};
 use slab::Slab;
 
@@ -67,6 +68,14 @@ impl Executor {
         if let Some(context) = self.source.context() {
             context.wakeup();
         }
+    }
+
+    /// Same as `spawn` above, but spawns a function that returns a future
+    pub fn spawn_fn<F, R>(&self, f: F)
+        where F: FnOnce() -> R + 'static,
+              R: IntoFuture<Item=(), Error=()> + 'static,
+    {
+        self.spawn(future::lazy(f))
     }
 }
 
