@@ -13,8 +13,10 @@ fn main() {
     let lp = MainLoop::new(None);
 
     let timeout = Timeout::new(Duration::from_millis(500));
+    let lp2 = lp.clone();
     let timeout = timeout.and_then(|_| {
         println!("Timeout");
+        lp2.quit();
         Ok(())
     });
 

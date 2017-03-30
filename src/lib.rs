@@ -390,6 +390,7 @@ impl<T: SourceFuncs> Source<T> {
     /// Adds a `Source` to a context so that it will be executed within that
     /// context.
     pub fn attach(&self, context: &MainContext) -> c_uint {
+        // NOTE: this is not thread-safe
         unsafe { glib_sys::g_source_attach(self.inner, context.inner) }
     }
 
@@ -403,11 +404,13 @@ impl<T: SourceFuncs> Source<T> {
     /// permitted to change the priority of a source once it has been added as a
     /// child of another source.
     pub fn set_priority(&self, priority: i32) {
+        // NOTE: this is not threadsafe if this isn't registered with a context
         unsafe { glib_sys::g_source_set_priority(self.inner, priority) }
     }
 
     /// Gets the priority of a source.
     pub fn priority(&self) -> i32 {
+        // NOTE: this is not threadsafe against concurrent writes
         unsafe { glib_sys::g_source_get_priority(self.inner) }
     }
 
@@ -417,12 +420,14 @@ impl<T: SourceFuncs> Source<T> {
     /// this source will be processed normally. Otherwise, all processing of
     /// this source is blocked until the dispatch function returns.
     pub fn set_can_recurse(&self, can_recurse: bool) {
+        // NOTE: this is not threadsafe if this isn't registered with a context
         let can_recurse = if can_recurse { TRUE } else { FALSE };
         unsafe { glib_sys::g_source_set_can_recurse(self.inner, can_recurse) }
     }
 
     /// Checks whether a source is allowed to be called recursively.
     pub fn can_recurse(&self) -> bool {
+        // NOTE: this is not threadsafe against concurrent writes
         unsafe { glib_sys::g_source_get_can_recurse(self.inner) == TRUE }
     }
 
@@ -470,6 +475,7 @@ impl<T: SourceFuncs> Source<T> {
     /// This API is only intended to be used by implementations of `Source`. Do
     /// not call this API on a `Source` that you did not create.
     pub fn set_ready_time(&self, ready_time: Option<Instant>) {
+        // NOTE: this is not threadsafe if this isn't registered with a context
         let time = match ready_time {
             Some(time) => {
                 let now = Instant::now();
