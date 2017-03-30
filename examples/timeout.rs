@@ -1,15 +1,16 @@
 extern crate futures;
 extern crate futures_glib;
-extern crate gtk;
+// extern crate gtk;
 
 use std::time::Duration;
 
 use futures::Stream;
-use futures_glib::{Interval, MainContext};
+use futures_glib::{Interval, MainContext, MainLoop};
 use futures_glib::future::FuncHandle;
 
 fn main() {
-    gtk::init().unwrap();
+    let cx = MainContext::default(|cx| cx.clone());
+    let lp = MainLoop::new(&cx);
 
     let interval = Interval::new(Duration::from_millis(500));
     let interval = interval.for_each(|_| {
@@ -18,10 +19,8 @@ fn main() {
     });
 
     let func_handle = FuncHandle::new();
+    func_handle.attach(&cx);
     func_handle.spawn(interval);
-    MainContext::default(|main_context| {
-        func_handle.attach(main_context);
-    });
 
-    gtk::main();
+    lp.run();
 }
