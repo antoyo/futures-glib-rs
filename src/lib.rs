@@ -5,7 +5,7 @@ extern crate glib_sys;
 extern crate libc;
 extern crate slab;
 
-pub mod future;
+mod future;
 mod stack;
 mod timeout;
 
@@ -19,6 +19,7 @@ use std::time::{Duration, Instant};
 use libc::{c_int, c_uint};
 
 pub use timeout::*;
+pub use future::Executor;
 
 const FALSE: c_int = 0;
 const TRUE: c_int = !FALSE;

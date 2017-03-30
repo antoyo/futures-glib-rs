@@ -4,8 +4,7 @@ extern crate futures_glib;
 use std::time::Duration;
 
 use futures::Stream;
-use futures_glib::{Interval, MainContext, MainLoop};
-use futures_glib::future::FuncHandle;
+use futures_glib::{Interval, MainContext, MainLoop, Executor};
 
 fn main() {
     let cx = MainContext::default(|cx| cx.clone());
@@ -17,9 +16,9 @@ fn main() {
         Ok(())
     });
 
-    let func_handle = FuncHandle::new();
-    func_handle.attach(&cx);
-    func_handle.spawn(interval);
+    let ex = Executor::new();
+    ex.attach(&cx);
+    ex.spawn(interval);
 
     lp.run();
 }

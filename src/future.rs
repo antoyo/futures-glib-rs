@@ -11,22 +11,41 @@ use slab::Slab;
 use super::{MainContext, Source, SourceFuncs};
 use stack::{Drain, Stack};
 
+/// A handle through which futures can be executed.
+///
+/// This structure is an instance of a `Source` which can be used to manage the
+/// execution of a number of futures within.
 #[derive(Clone)]
-pub struct FuncHandle {
+pub struct Executor {
     source: Source<Inner>,
 }
 
-impl FuncHandle {
+impl Executor {
+    /// Creates a new executor unassociated with any context ready to start
+    /// spawning futures.
     pub fn new() -> Self {
-        FuncHandle {
+        Executor {
             source: Source::new(Inner::new()),
         }
     }
 
+    /// Attaches this executor to a context, returning the token that it was
+    /// assigned.
+    ///
+    /// This is required to be called for futures to be completed.
     pub fn attach(&self, cx: &MainContext) -> c_uint {
         self.source.attach(cx)
     }
 
+    /// Spawns a new future onto the event loop that this source is associated
+    /// with.
+    ///
+    /// This function is given a future which is then spawned onto the glib
+    /// event loop. The glib event loop will listen for incoming events of when
+    /// futures are ready and attempt to push them all to completion.
+    ///
+    /// The futures spawned here will not be completed unless the `attach`
+    /// function is called above.
     pub fn spawn<F: Future<Item=(), Error=()> + 'static>(&self, future: F) {
         let inner = self.source.get_ref();
         let mut queue = inner.queue.borrow_mut();
