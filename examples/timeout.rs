@@ -9,7 +9,7 @@ use futures_glib::future::FuncHandle;
 
 fn main() {
     let cx = MainContext::default(|cx| cx.clone());
-    let lp = MainLoop::new(&cx);
+    let lp = MainLoop::new(None);
 
     let interval = Interval::new(Duration::from_millis(500));
     let interval = interval.for_each(|_| {

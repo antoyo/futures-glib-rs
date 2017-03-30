@@ -1,10 +1,11 @@
 use std::cell::RefCell;
 use std::iter::Peekable;
 use std::sync::{Arc, Weak};
+use std::time::Duration;
 
 use futures::{Future, Async};
 use futures::executor::{Spawn, Unpark, spawn};
-use libc::{c_int, c_uint};
+use libc::c_uint;
 use slab::Slab;
 
 use super::{MainContext, Source, SourceFuncs};
@@ -40,15 +41,15 @@ impl FuncHandle {
             future: Some(spawn(Box::new(future))),
         });
         inner.ready_queue.push(index);
-        if let Some(context) = self.source.get_context() {
+        if let Some(context) = self.source.context() {
             context.wakeup();
         }
     }
 }
 
 impl SourceFuncs for Inner {
-    fn prepare(&self, _source: &Source<Self>, _timeout: &mut c_int) -> bool {
-        false
+    fn prepare(&self, _source: &Source<Self>) -> (bool, Option<Duration>) {
+        (false, None)
     }
 
     fn check(&self, _source: &Source<Self>) -> bool {
@@ -61,7 +62,7 @@ impl SourceFuncs for Inner {
     fn dispatch<F: FnMut() -> bool>(&self,
                                     source: &Source<Self>,
                                     _callback: F) -> bool {
-        let cx = source.get_context().expect("no context in dispatch");
+        let cx = source.context().expect("no context in dispatch");
         for index in self.pending.borrow_mut().by_ref() {
             let (task, wake) = {
                 let mut queue = self.queue.borrow_mut();
