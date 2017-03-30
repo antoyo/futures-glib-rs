@@ -139,6 +139,44 @@ impl MainContext {
             glib_sys::g_main_context_wakeup(self.inner)
         }
     }
+
+    /// Acquires context and sets it as the thread-default context for the
+    /// current thread.
+    ///
+    /// This will cause certain asynchronous operations (such as most gio-based
+    /// I/O) which are started in this thread to run under context and deliver
+    /// their results to its main loop, rather than running under the global
+    /// default context in the main thread. Note that calling this function
+    /// changes the context returned by `thread_default` not the one returned
+    /// by `default`.
+    ///
+    /// Normally you would call this function shortly after creating a new
+    /// thread, passing it a `MainContext` which will be run by a `MainLoop` in
+    /// that thread, to set a new default context for all async operations in
+    /// that thread.
+    ///
+    /// If you don't have control over how the new thread was created (e.g. in
+    /// the new thread isn't newly created, or if the thread life cycle is
+    /// managed by a `ThreadPool`), it is always suggested to wrap the logic
+    /// that needs to use the new `MainContext` inside `push_thread_default` block.
+    /// otherwise threads that are re-used will end up never explicitly
+    /// releasing the `MainContext` reference they hold.
+    ///
+    /// In some cases you may want to schedule a single operation in a
+    /// non-default context, or temporarily use a non-default context in the
+    /// main thread. In that case, you can wrap the call to the asynchronous
+    /// operation inside a `push_thread_default` block, but it is up to you to
+    /// ensure that no other asynchronous operations accidentally get started
+    /// while the non-default context is active.
+    ///
+    /// This context will be popped from the default scope when the returned
+    /// `PushThreadDefault` value goes out of scope.
+    pub fn push_thread_default(&self) -> PushThreadDefault {
+        unsafe {
+            glib_sys::g_main_context_push_thread_default(self.inner);
+        }
+        PushThreadDefault { inner: self }
+    }
 }
 
 impl Clone for MainContext {
@@ -208,6 +246,20 @@ impl Drop for LockedMainContext {
     fn drop(&mut self) {
         unsafe {
             glib_sys::g_main_context_release(self.inner.inner);
+        }
+    }
+}
+
+/// An RAII struct that is returned from `push_thread_default` to pop the
+/// default when it goes out of scope.
+pub struct PushThreadDefault<'a> {
+    inner: &'a MainContext,
+}
+
+impl<'a> Drop for PushThreadDefault<'a> {
+    fn drop(&mut self) {
+        unsafe {
+            glib_sys::g_main_context_pop_thread_default(self.inner.inner);
         }
     }
 }
