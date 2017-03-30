@@ -1,6 +1,5 @@
 extern crate futures;
 extern crate futures_glib;
-// extern crate gtk;
 
 use std::time::Duration;
 
