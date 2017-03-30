@@ -67,3 +67,30 @@ fn oneshot2() {
     lp.run();
     e.destroy();
 }
+
+#[test]
+fn oneshot_many() {
+    let cx = MainContext::new();
+    let lp = MainLoop::new(Some(&cx));
+    let e = Executor::new();
+    e.attach(&cx);
+
+    let (tx1, rx1) = oneshot::channel();
+    let (tx2, rx2) = oneshot::channel();
+    let lp2 = lp.clone();
+
+    let rx1 = rx1.then(|r| {
+        thread::spawn(|| tx2.send(()).unwrap());
+        r
+    });
+    e.spawn(rx1.join(rx2).then(move |_| {
+        lp2.quit();
+        Ok(())
+    }));
+
+    let t = thread::spawn(|| tx1.send(()).unwrap());
+
+    lp.run();
+    e.destroy();
+    t.join().unwrap();
+}
