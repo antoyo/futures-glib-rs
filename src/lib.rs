@@ -113,11 +113,11 @@ impl MainContext {
     ///
     /// If the context is successfully locked then a locked version is
     /// returned, otherwise an `Err` is returned with this context.
-    pub fn try_lock(self) -> Result<LockedMainContext, MainContext> {
-        if unsafe { glib_sys::g_main_context_acquire(self.inner) } == TRUE {
-            Ok(LockedMainContext { inner: self, _marker: marker::PhantomData })
+    pub fn try_lock(&self) -> Option<LockedMainContext> {
+        if unsafe { glib_sys::g_main_context_acquire(self.inner) } != 0 {
+            Some(LockedMainContext { inner: self, _marker: marker::PhantomData })
         } else {
-            Err(self)
+            None
         }
     }
 
@@ -127,7 +127,7 @@ impl MainContext {
     /// This is useful to know before waiting on another thread that may be
     /// blocking to get ownership of context .
     pub fn is_owner(&self) -> bool {
-        unsafe { glib_sys::g_main_context_is_owner(self.inner) == TRUE }
+        unsafe { glib_sys::g_main_context_is_owner(self.inner) != 0 }
     }
 
     /// If context is currently blocking in `iteration` waiting for a source to
@@ -203,12 +203,12 @@ impl Drop for MainContext {
     }
 }
 
-pub struct LockedMainContext {
-    inner: MainContext,
+pub struct LockedMainContext<'a> {
+    inner: &'a MainContext,
     _marker: marker::PhantomData<Rc<()>>, // cannot share across threads
 }
 
-impl LockedMainContext {
+impl<'a> LockedMainContext<'a> {
     /// Runs a single iteration for the given main loop.
     ///
     /// This involves checking to see if any event sources are ready to be
@@ -228,27 +228,18 @@ impl LockedMainContext {
         let r = unsafe {
             glib_sys::g_main_context_iteration(self.inner.inner, may_block as c_int)
         };
-        r == TRUE
+        r != 0
     }
 
     /// Checks if any sources have pending events for the given context.
     pub fn pending(&self) -> bool {
         unsafe {
-            glib_sys::g_main_context_pending(self.inner.inner) == TRUE
+            glib_sys::g_main_context_pending(self.inner.inner) != 0
         }
-    }
-
-    /// Unlocks this context, returning the underlying unlocked main context.
-    ///
-    /// Note that this is not required to be called, if this context goes out of
-    /// scope it will also be unlocked.
-    pub fn unlock(self) -> MainContext {
-        // TODO: avoid frobbing the refcount here.
-        self.inner.clone()
     }
 }
 
-impl Drop for LockedMainContext {
+impl<'a> Drop for LockedMainContext<'a> {
     fn drop(&mut self) {
         unsafe {
             glib_sys::g_main_context_release(self.inner.inner);
@@ -312,7 +303,7 @@ impl MainLoop {
     /// `run`.
     pub fn is_running(&self) -> bool {
         unsafe {
-            glib_sys::g_main_loop_is_running(self.inner) == TRUE
+            glib_sys::g_main_loop_is_running(self.inner) != 0
         }
     }
 
@@ -438,7 +429,7 @@ impl<T: SourceFuncs> Source<T> {
     /// Checks whether a source is allowed to be called recursively.
     pub fn can_recurse(&self) -> bool {
         // NOTE: this is not threadsafe against concurrent writes
-        unsafe { glib_sys::g_source_get_can_recurse(self.inner) == TRUE }
+        unsafe { glib_sys::g_source_get_can_recurse(self.inner) != 0 }
     }
 
     /// Returns the numeric ID for a particular source.
