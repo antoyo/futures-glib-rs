@@ -1,69 +1,63 @@
-use std::sync::Arc;
+use std::cell::Cell;
+use std::rc::Rc;
 use std::time::Duration;
 
-use futures::{Async, Stream};
-use futures::executor::{Spawn, Unpark, spawn};
-use futures::sync::mpsc;
+use futures::{Async, Future};
+use futures::unsync::oneshot;
 use glib_sys;
 use glib_sys::{gboolean, gpointer, g_timeout_add_full};
 use libc::c_uint;
 
-pub struct Interval {
+use utils::millis;
+
+pub struct Timeout {
     id: c_uint,
-    rx: mpsc::Receiver<()>,
+    rx: oneshot::Receiver<()>,
+    triggered: Rc<Cell<bool>>,
 }
 
-impl Interval {
+impl Timeout {
     pub fn new(duration: Duration) -> Self {
-        let (tx, rx) = mpsc::channel(0);
-        let tx = Box::into_raw(Box::new(spawn(tx)));
+        assert_initialized_main_thread!();
+        let triggered = Rc::new(Cell::new(false));
+        let (tx, rx) = oneshot::channel();
+        let tx = Box::into_raw(Box::new(Some((tx, triggered.clone()))));
         let id = unsafe { g_timeout_add_full(glib_sys::G_PRIORITY_DEFAULT, millis(duration) as u32, Some(handler),
             tx as gpointer, Some(destroy)) };
-        Interval {
+        Timeout {
             id: id,
             rx: rx,
+            triggered: triggered,
         }
     }
 }
 
-impl Drop for Interval {
+impl Drop for Timeout {
     fn drop(&mut self) {
-        unsafe { glib_sys::g_source_remove(self.id) };
+        if !self.triggered.get() {
+            unsafe { glib_sys::g_source_remove(self.id) };
+        }
     }
 }
 
-impl Stream for Interval {
+impl Future for Timeout {
     type Item = ();
     type Error = ();
 
-    fn poll(&mut self) -> Result<Async<Option<Self::Item>>, Self::Error> {
+    fn poll(&mut self) -> Result<Async<()>, ()> {
         self.rx.poll()
+            .map_err(|_| ())
     }
 }
 
-const NANOS_PER_MILLI: u32 = 1_000_000;
-const MILLIS_PER_SEC: u64 = 1_000;
-
-pub fn millis(duration: Duration) -> u64 {
-    // Round up.
-    let millis = (duration.subsec_nanos() + NANOS_PER_MILLI - 1) / NANOS_PER_MILLI;
-    duration.as_secs().saturating_mul(MILLIS_PER_SEC).saturating_add(millis as u64)
-}
-
-unsafe extern fn destroy(data: gpointer) {
-    let _ = Box::from_raw(data as *mut Spawn<mpsc::Sender<()>>);
-}
-
 unsafe extern fn handler(data: gpointer) -> gboolean {
-    let tx = data as *mut Spawn<mpsc::Sender<()>>;
-    let no_op = Arc::new(NoOp {}) as Arc<Unpark>;
-    drop((*tx).start_send((), &no_op));
-    1
+    let tuple = data as *mut Option<(oneshot::Sender<()>, Rc<Cell<bool>>)>;
+    let (tx, triggered) = (*tuple).take().unwrap();
+    triggered.set(true);
+    drop(tx.send(()));
+    0
 }
 
-struct NoOp {
-}
-
-impl Unpark for NoOp {
-    fn unpark(&self) {}
+pub unsafe extern fn destroy(data: gpointer) {
+    let _ = Box::from_raw(data as *mut Option<(oneshot::Sender<()>, Rc<Cell<bool>>)>);
 }

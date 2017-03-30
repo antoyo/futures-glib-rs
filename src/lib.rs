@@ -6,8 +6,12 @@ extern crate libc;
 extern crate slab;
 
 mod future;
+mod interval;
+#[macro_use]
+mod rt;
 mod stack;
 mod timeout;
+mod utils;
 
 use std::cmp;
 use std::marker;
@@ -18,8 +22,10 @@ use std::time::{Duration, Instant};
 
 use libc::{c_int, c_uint};
 
-pub use timeout::Interval;
 pub use future::Executor;
+pub use interval::Interval;
+pub use rt::init;
+pub use timeout::Timeout;
 
 const FALSE: c_int = 0;
 const TRUE: c_int = !FALSE;
@@ -470,7 +476,7 @@ impl<T: SourceFuncs> Source<T> {
                 if now < time {
                     let duration = time.duration_since(now);
                     let mono_time = unsafe { glib_sys::g_get_monotonic_time() };
-                    (timeout::millis(duration) * 1000) as i64 + mono_time
+                    (utils::millis(duration) * 1000) as i64 + mono_time
                 }
                 else {
                     0
@@ -548,7 +554,7 @@ unsafe extern fn prepare<T: SourceFuncs>(source: *mut glib_sys::GSource,
         return FALSE
     }
     if let Some(dur) = duration {
-        *timeout = cmp::max(timeout::millis(dur), <c_int>::max_value() as u64) as c_int;
+        *timeout = cmp::max(utils::millis(dur), <c_int>::max_value() as u64) as c_int;
     }
     return TRUE
 }
