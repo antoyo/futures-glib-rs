@@ -28,7 +28,6 @@ impl Interval {
 
 impl Drop for Interval {
     fn drop(&mut self) {
-        println!("source remove");
         unsafe { glib_sys::g_source_remove(self.id) };
     }
 }
