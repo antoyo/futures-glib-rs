@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 
 use libc::{c_int, c_uint};
 
-pub use timeout::*;
+pub use timeout::Interval;
 pub use future::Executor;
 
 const FALSE: c_int = 0;
