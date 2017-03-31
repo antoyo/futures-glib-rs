@@ -12,6 +12,8 @@ mod interval;
 mod stack;
 mod timeout;
 mod utils;
+mod io;
+mod error;
 
 use std::cmp;
 use std::marker;
@@ -26,6 +28,8 @@ pub use future::Executor;
 pub use interval::Interval;
 pub use rt::init;
 pub use timeout::Timeout;
+pub use io::{IoChannel, IoCondition};
+pub use error::Error;
 
 const FALSE: c_int = 0;
 const TRUE: c_int = !FALSE;
@@ -347,6 +351,10 @@ struct Inner<T> {
     data: T,
 }
 
+fn source_new(source: *mut glib_sys::GSource) -> Source<()> {
+    Source { inner: source, _marker: marker::PhantomData }
+}
+
 impl<T: SourceFuncs> Source<T> {
     /// Creates a new `GSource` structure.
     ///
@@ -371,7 +379,9 @@ impl<T: SourceFuncs> Source<T> {
             }
         }
     }
+}
 
+impl<T> Source<T> {
     /// Acquires an underlying reference to the data contained within this
     /// `Source`.
     pub fn get_ref(&self) -> &T {
@@ -453,6 +463,33 @@ impl<T: SourceFuncs> Source<T> {
                     inner: context,
                 })
             }
+        }
+    }
+
+    /// Sets the callback function for a source. The callback for a source is
+    /// called from the source's dispatch function.
+    pub fn set_callback<F>(&self, f: F)
+        where F: FnMut() -> bool
+    {
+        let callback = Box::into_raw(Box::new(f));
+        unsafe {
+            glib_sys::g_source_set_callback(self.inner,
+                                            Some(call::<F>),
+                                            callback as *mut _,
+                                            Some(destroy::<F>));
+        }
+
+        unsafe extern fn call<F>(user_data: glib_sys::gpointer) -> glib_sys::gboolean
+            where F: FnMut() -> bool
+        {
+            // TODO: needs a bomb to abort on panic
+            let f = user_data as *mut F;
+            if (*f)() { 1 } else { 0 }
+        }
+
+        unsafe extern fn destroy<F>(user_data: glib_sys::gpointer) {
+            // TODO: needs a bomb to abort on panic
+            drop(Box::from_raw(user_data as *mut F));
         }
     }
 
@@ -551,6 +588,7 @@ pub trait SourceFuncs: Sized {
 unsafe extern fn prepare<T: SourceFuncs>(source: *mut glib_sys::GSource,
                                          timeout: *mut c_int)
                                          -> glib_sys::gboolean {
+    // TODO: needs a bomb to abort on panic
     let inner = source as *mut Inner<T>;
     let source = ManuallyDrop::new(Source {
         inner: source,
@@ -567,6 +605,7 @@ unsafe extern fn prepare<T: SourceFuncs>(source: *mut glib_sys::GSource,
 }
 
 unsafe extern fn check<T: SourceFuncs>(source: *mut glib_sys::GSource) -> glib_sys::gboolean {
+    // TODO: needs a bomb to abort on panic
     let inner = source as *mut Inner<T>;
     let source = ManuallyDrop::new(Source {
         inner: source,
@@ -581,6 +620,7 @@ unsafe extern fn check<T: SourceFuncs>(source: *mut glib_sys::GSource) -> glib_s
 }
 
 unsafe extern fn dispatch<T: SourceFuncs>(source: *mut glib_sys::GSource, source_func: glib_sys::GSourceFunc, data: glib_sys::gpointer) -> glib_sys::gboolean {
+    // TODO: needs a bomb to abort on panic
     let inner = source as *mut Inner<T>;
     let source = ManuallyDrop::new(Source {
         inner: source,
@@ -602,6 +642,7 @@ unsafe extern fn dispatch<T: SourceFuncs>(source: *mut glib_sys::GSource, source
 }
 
 unsafe extern fn finalize<T: SourceFuncs>(source: *mut glib_sys::GSource) {
+    // TODO: needs a bomb to abort on panic
     let source = source as *mut Inner<T>;
     ptr::read(&(*source).funcs);
     ptr::read(&(*source).data);
