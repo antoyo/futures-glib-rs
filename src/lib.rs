@@ -12,6 +12,8 @@ mod interval;
 mod stack;
 mod timeout;
 mod utils;
+mod io;
+mod error;
 
 use std::cmp;
 use std::marker;
@@ -26,6 +28,8 @@ pub use future::{Executor, Remote};
 pub use interval::Interval;
 pub use rt::init;
 pub use timeout::Timeout;
+pub use io::{IoChannel, IoCondition};
+pub use error::Error;
 
 const FALSE: c_int = 0;
 const TRUE: c_int = !FALSE;
@@ -113,11 +117,11 @@ impl MainContext {
     ///
     /// If the context is successfully locked then a locked version is
     /// returned, otherwise an `Err` is returned with this context.
-    pub fn try_lock(self) -> Result<LockedMainContext, MainContext> {
-        if unsafe { glib_sys::g_main_context_acquire(self.inner) } == TRUE {
-            Ok(LockedMainContext { inner: self, _marker: marker::PhantomData })
+    pub fn try_lock(&self) -> Option<LockedMainContext> {
+        if unsafe { glib_sys::g_main_context_acquire(self.inner) } != 0 {
+            Some(LockedMainContext { inner: self, _marker: marker::PhantomData })
         } else {
-            Err(self)
+            None
         }
     }
 
@@ -127,7 +131,7 @@ impl MainContext {
     /// This is useful to know before waiting on another thread that may be
     /// blocking to get ownership of context .
     pub fn is_owner(&self) -> bool {
-        unsafe { glib_sys::g_main_context_is_owner(self.inner) == TRUE }
+        unsafe { glib_sys::g_main_context_is_owner(self.inner) != 0 }
     }
 
     /// If context is currently blocking in `iteration` waiting for a source to
@@ -203,12 +207,12 @@ impl Drop for MainContext {
     }
 }
 
-pub struct LockedMainContext {
-    inner: MainContext,
+pub struct LockedMainContext<'a> {
+    inner: &'a MainContext,
     _marker: marker::PhantomData<Rc<()>>, // cannot share across threads
 }
 
-impl LockedMainContext {
+impl<'a> LockedMainContext<'a> {
     /// Runs a single iteration for the given main loop.
     ///
     /// This involves checking to see if any event sources are ready to be
@@ -228,27 +232,18 @@ impl LockedMainContext {
         let r = unsafe {
             glib_sys::g_main_context_iteration(self.inner.inner, may_block as c_int)
         };
-        r == TRUE
+        r != 0
     }
 
     /// Checks if any sources have pending events for the given context.
     pub fn pending(&self) -> bool {
         unsafe {
-            glib_sys::g_main_context_pending(self.inner.inner) == TRUE
+            glib_sys::g_main_context_pending(self.inner.inner) != 0
         }
-    }
-
-    /// Unlocks this context, returning the underlying unlocked main context.
-    ///
-    /// Note that this is not required to be called, if this context goes out of
-    /// scope it will also be unlocked.
-    pub fn unlock(self) -> MainContext {
-        // TODO: avoid frobbing the refcount here.
-        self.inner.clone()
     }
 }
 
-impl Drop for LockedMainContext {
+impl<'a> Drop for LockedMainContext<'a> {
     fn drop(&mut self) {
         unsafe {
             glib_sys::g_main_context_release(self.inner.inner);
@@ -312,7 +307,7 @@ impl MainLoop {
     /// `run`.
     pub fn is_running(&self) -> bool {
         unsafe {
-            glib_sys::g_main_loop_is_running(self.inner) == TRUE
+            glib_sys::g_main_loop_is_running(self.inner) != 0
         }
     }
 
@@ -356,6 +351,10 @@ struct Inner<T> {
     data: T,
 }
 
+fn source_new(source: *mut glib_sys::GSource) -> Source<()> {
+    Source { inner: source, _marker: marker::PhantomData }
+}
+
 impl<T: SourceFuncs> Source<T> {
     /// Creates a new `GSource` structure.
     ///
@@ -380,7 +379,9 @@ impl<T: SourceFuncs> Source<T> {
             }
         }
     }
+}
 
+impl<T> Source<T> {
     /// Acquires an underlying reference to the data contained within this
     /// `Source`.
     pub fn get_ref(&self) -> &T {
@@ -389,8 +390,19 @@ impl<T: SourceFuncs> Source<T> {
 
     /// Adds a `Source` to a context so that it will be executed within that
     /// context.
-    pub fn attach(&self, context: &MainContext) -> c_uint {
-        unsafe { glib_sys::g_source_attach(self.inner, context.inner) }
+    pub fn attach(&self, context: &MainContext) {
+        // NOTE: this is not thread-safe
+        unsafe { glib_sys::g_source_attach(self.inner, context.inner); }
+    }
+
+    /// Removes a source from its `MainContext`, if any, and mark it as
+    /// destroyed.
+    ///
+    /// The source cannot be subsequently added to another context.  It is safe
+    /// to call this on sources which have already been removed from their
+    /// context.
+    pub fn destroy(&self) {
+        unsafe { glib_sys::g_source_destroy(self.inner) }
     }
 
     /// Sets the priority of a source.
@@ -403,11 +415,13 @@ impl<T: SourceFuncs> Source<T> {
     /// permitted to change the priority of a source once it has been added as a
     /// child of another source.
     pub fn set_priority(&self, priority: i32) {
+        // NOTE: this is not threadsafe if this isn't registered with a context
         unsafe { glib_sys::g_source_set_priority(self.inner, priority) }
     }
 
     /// Gets the priority of a source.
     pub fn priority(&self) -> i32 {
+        // NOTE: this is not threadsafe against concurrent writes
         unsafe { glib_sys::g_source_get_priority(self.inner) }
     }
 
@@ -417,13 +431,15 @@ impl<T: SourceFuncs> Source<T> {
     /// this source will be processed normally. Otherwise, all processing of
     /// this source is blocked until the dispatch function returns.
     pub fn set_can_recurse(&self, can_recurse: bool) {
+        // NOTE: this is not threadsafe if this isn't registered with a context
         let can_recurse = if can_recurse { TRUE } else { FALSE };
         unsafe { glib_sys::g_source_set_can_recurse(self.inner, can_recurse) }
     }
 
     /// Checks whether a source is allowed to be called recursively.
     pub fn can_recurse(&self) -> bool {
-        unsafe { glib_sys::g_source_get_can_recurse(self.inner) == TRUE }
+        // NOTE: this is not threadsafe against concurrent writes
+        unsafe { glib_sys::g_source_get_can_recurse(self.inner) != 0 }
     }
 
     /// Returns the numeric ID for a particular source.
@@ -450,6 +466,33 @@ impl<T: SourceFuncs> Source<T> {
         }
     }
 
+    /// Sets the callback function for a source. The callback for a source is
+    /// called from the source's dispatch function.
+    pub fn set_callback<F>(&self, f: F)
+        where F: FnMut() -> bool
+    {
+        let callback = Box::into_raw(Box::new(f));
+        unsafe {
+            glib_sys::g_source_set_callback(self.inner,
+                                            Some(call::<F>),
+                                            callback as *mut _,
+                                            Some(destroy::<F>));
+        }
+
+        unsafe extern fn call<F>(user_data: glib_sys::gpointer) -> glib_sys::gboolean
+            where F: FnMut() -> bool
+        {
+            // TODO: needs a bomb to abort on panic
+            let f = user_data as *mut F;
+            if (*f)() { 1 } else { 0 }
+        }
+
+        unsafe extern fn destroy<F>(user_data: glib_sys::gpointer) {
+            // TODO: needs a bomb to abort on panic
+            drop(Box::from_raw(user_data as *mut F));
+        }
+    }
+
     /// Sets a `Source` to be dispatched when the given monotonic time is
     /// reached (or passed). If the monotonic time is in the past (as it always
     /// will be if ready_time is the current time) then the source will be
@@ -470,6 +513,7 @@ impl<T: SourceFuncs> Source<T> {
     /// This API is only intended to be used by implementations of `Source`. Do
     /// not call this API on a `Source` that you did not create.
     pub fn set_ready_time(&self, ready_time: Option<Instant>) {
+        // NOTE: this is not threadsafe if this isn't registered with a context
         let time = match ready_time {
             Some(time) => {
                 let now = Instant::now();
@@ -544,6 +588,7 @@ pub trait SourceFuncs: Sized {
 unsafe extern fn prepare<T: SourceFuncs>(source: *mut glib_sys::GSource,
                                          timeout: *mut c_int)
                                          -> glib_sys::gboolean {
+    // TODO: needs a bomb to abort on panic
     let inner = source as *mut Inner<T>;
     let source = ManuallyDrop::new(Source {
         inner: source,
@@ -560,6 +605,7 @@ unsafe extern fn prepare<T: SourceFuncs>(source: *mut glib_sys::GSource,
 }
 
 unsafe extern fn check<T: SourceFuncs>(source: *mut glib_sys::GSource) -> glib_sys::gboolean {
+    // TODO: needs a bomb to abort on panic
     let inner = source as *mut Inner<T>;
     let source = ManuallyDrop::new(Source {
         inner: source,
@@ -574,6 +620,7 @@ unsafe extern fn check<T: SourceFuncs>(source: *mut glib_sys::GSource) -> glib_s
 }
 
 unsafe extern fn dispatch<T: SourceFuncs>(source: *mut glib_sys::GSource, source_func: glib_sys::GSourceFunc, data: glib_sys::gpointer) -> glib_sys::gboolean {
+    // TODO: needs a bomb to abort on panic
     let inner = source as *mut Inner<T>;
     let source = ManuallyDrop::new(Source {
         inner: source,
@@ -595,6 +642,7 @@ unsafe extern fn dispatch<T: SourceFuncs>(source: *mut glib_sys::GSource, source
 }
 
 unsafe extern fn finalize<T: SourceFuncs>(source: *mut glib_sys::GSource) {
+    // TODO: needs a bomb to abort on panic
     let source = source as *mut Inner<T>;
     ptr::read(&(*source).funcs);
     ptr::read(&(*source).data);

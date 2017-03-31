@@ -13,8 +13,10 @@ fn main() {
     let lp = MainLoop::new(None);
 
     let timeout = Timeout::new(Duration::from_millis(500));
-    let timeout = timeout.and_then(|_| {
+    let lp2 = lp.clone();
+    let timeout = timeout.and_then(move |_| {
         println!("Timeout");
+        lp2.quit();
         Ok(())
     });
 
@@ -23,4 +25,6 @@ fn main() {
     ex.spawn(timeout);
 
     lp.run();
+
+    ex.destroy();
 }

@@ -5,8 +5,8 @@ use std::time::Duration;
 
 use futures::{Async, Future, IntoFuture};
 use futures::executor::{Spawn, Unpark, spawn};
+use futures::future;
 use futures::sync::mpsc;
-use libc::c_uint;
 use slab::Slab;
 
 use super::{MainContext, Source, SourceFuncs};
@@ -36,7 +36,7 @@ impl Executor {
     /// assigned.
     ///
     /// This is required to be called for futures to be completed.
-    pub fn attach(&self, cx: &MainContext) -> c_uint {
+    pub fn attach(&self, cx: &MainContext) {
         cx.wakeup();
         self.source.attach(cx)
     }
@@ -47,6 +47,11 @@ impl Executor {
         Remote {
             tx: inner.tx.clone(),
         }
+    }
+
+    /// Unregister this executor and free up internal resources.
+    pub fn destroy(&self) {
+        self.source.destroy()
     }
 
     /// Spawns a new future onto the event loop that this source is associated
@@ -61,6 +66,14 @@ impl Executor {
     pub fn spawn<F: Future<Item=(), Error=()> + 'static>(&self, future: F) {
         let inner = self.source.get_ref();
         inner.spawn(future, &self.source);
+    }
+
+    /// Same as `spawn` above, but spawns a function that returns a future
+    pub fn spawn_fn<F, R>(&self, f: F)
+        where F: FnOnce() -> R + 'static,
+              R: IntoFuture<Item=(), Error=()> + 'static,
+    {
+        self.spawn(future::lazy(f))
     }
 }
 
