@@ -3,7 +3,10 @@
 extern crate futures;
 extern crate glib_sys;
 extern crate libc;
+extern crate net2;
 extern crate slab;
+#[macro_use]
+extern crate tokio_io;
 
 #[macro_use]
 mod rt;
@@ -14,6 +17,7 @@ mod timeout;
 mod utils;
 mod io;
 mod error;
+pub mod net;
 
 use std::cmp;
 use std::marker;
@@ -351,7 +355,7 @@ struct Inner<T> {
     data: T,
 }
 
-fn source_new(source: *mut glib_sys::GSource) -> Source<()> {
+fn source_new<T>(source: *mut glib_sys::GSource) -> Source<T> {
     Source { inner: source, _marker: marker::PhantomData }
 }
 
@@ -379,9 +383,7 @@ impl<T: SourceFuncs> Source<T> {
             }
         }
     }
-}
 
-impl<T> Source<T> {
     /// Acquires an underlying reference to the data contained within this
     /// `Source`.
     pub fn get_ref(&self) -> &T {
@@ -469,24 +471,24 @@ impl<T> Source<T> {
     /// Sets the callback function for a source. The callback for a source is
     /// called from the source's dispatch function.
     pub fn set_callback<F>(&self, f: F)
-        where F: FnMut() -> bool
+        where F: FnMut(T::CallbackArg) -> bool + 'static,
     {
         let callback = Box::into_raw(Box::new(f));
         unsafe {
             glib_sys::g_source_set_callback(self.inner,
-                                            Some(call::<F>),
+                                            T::g_source_func::<F>(),
                                             callback as *mut _,
                                             Some(destroy::<F>));
         }
-
-        unsafe extern fn call<F>(user_data: glib_sys::gpointer) -> glib_sys::gboolean
-            where F: FnMut() -> bool
-        {
-            // TODO: needs a bomb to abort on panic
-            let f = user_data as *mut F;
-            if (*f)() { 1 } else { 0 }
-        }
-
+        //
+        // unsafe extern fn call<F>(user_data: glib_sys::gpointer) -> glib_sys::gboolean
+        //     where F: FnMut() -> bool
+        // {
+        //     // TODO: needs a bomb to abort on panic
+        //     let f = user_data as *mut F;
+        //     if (*f)() { 1 } else { 0 }
+        // }
+        //
         unsafe extern fn destroy<F>(user_data: glib_sys::gpointer) {
             // TODO: needs a bomb to abort on panic
             drop(Box::from_raw(user_data as *mut F));
@@ -530,6 +532,89 @@ impl<T> Source<T> {
         };
         unsafe { glib_sys::g_source_set_ready_time(self.inner, time) }
     }
+
+    /// Monitors fd for the IO events in events.
+    ///
+    /// The token returned by this function can be used to remove or modify the
+    /// monitoring of the fd using `unix_remove_fd` or `unix_modify_fd`.
+    ///
+    /// It is not necessary to remove the fd before destroying the source; it
+    /// will be cleaned up automatically.
+    ///
+    /// This API is only intended to be used by implementations of `Source`. Do
+    /// not call this API on a `Source` that you did not create.
+    ///
+    /// As the name suggests, this function is not available on Windows.
+    #[cfg(unix)]
+    pub fn unix_add_fd(&self, fd: i32, events: &IoCondition) -> UnixToken {
+        unsafe {
+            let ptr = glib_sys::g_source_add_unix_fd(self.inner, fd, io::bits(events));
+            UnixToken(ptr)
+        }
+    }
+
+    /// Updates the event mask to watch for the fd identified by tag .
+    ///
+    /// `token` is the token returned from `unix_add_fd`
+    ///
+    /// If you want to remove a fd, don't set its event mask to zero. Instead,
+    /// call `remove_unix_fd`
+    ///
+    /// This API is only intended to be used by implementations of `Source`. Do
+    /// not call this API on a `Source` that you did not create.
+    ///
+    /// As the name suggests, this function is not available on Windows.
+    ///
+    /// # Unsafety
+    ///
+    /// This function can only be called with tokens that were returned from
+    /// this source's `unix_add_fd` implementation and haven't been removed yet.
+    #[cfg(unix)]
+    pub unsafe fn unix_modify_fd(&self,
+                                 token: &UnixToken,
+                                 events: &IoCondition) {
+        glib_sys::g_source_modify_unix_fd(self.inner, token.0, io::bits(events));
+    }
+
+    /// Reverses the effect of a previous call to `unix_add_fd`.
+    ///
+    /// You only need to call this if you want to remove an fd from being
+    /// watched while keeping the same source around. In the normal case you
+    /// will just want to destroy the source.
+    ///
+    /// This API is only intended to be used by implementations of `Source`. Do
+    /// not call this API on a `Source` that you did not create.
+    ///
+    /// As the name suggests, this function is not available on Windows.
+    ///
+    /// # Unsafety
+    ///
+    /// This function can only be called with tokens that were returned from
+    /// this source's `unix_add_fd` implementation and haven't been removed yet.
+    #[cfg(unix)]
+    pub unsafe fn unix_remove_fd(&self, token: &UnixToken) {
+        glib_sys::g_source_remove_unix_fd(self.inner, token.0)
+    }
+
+    /// Queries the events reported for the fd corresponding to token on source
+    /// during the last poll.
+    ///
+    /// The return value of this function is only defined when the function is
+    /// called from the check or dispatch functions for source.
+    ///
+    /// This API is only intended to be used by implementations of `Source`. Do
+    /// not call this API on a `Source` that you did not create.
+    ///
+    /// As the name suggests, this function is not available on Windows.
+    ///
+    /// # Unsafety
+    ///
+    /// This function can only be called with tokens that were returned from
+    /// this source's `unix_add_fd` implementation and haven't been removed yet.
+    #[cfg(unix)]
+    pub unsafe fn unix_query_fd(&self, token: &UnixToken) -> IoCondition {
+        io::bits_new(glib_sys::g_source_query_unix_fd(self.inner, token.0))
+    }
 }
 
 impl<T> Clone for Source<T> {
@@ -553,8 +638,15 @@ impl<T> Drop for Source<T> {
     }
 }
 
+/// Tokens returns from `unix_add_fd` to later remove the fd.
+#[cfg(unix)]
+pub struct UnixToken(glib_sys::gpointer);
+
 /// Trait for the callbacks that will be invoked by the `Source` type.
 pub trait SourceFuncs: Sized {
+    /// Type passed to the callback in `dispatch`.
+    type CallbackArg;
+
     /// Called before all the file descriptors are polled.
     ///
     /// If the source can determine that it is ready here (without waiting for
@@ -582,7 +674,16 @@ pub trait SourceFuncs: Sized {
     /// function should call the callback function. The return value of the
     /// dispatch function should be `false` if the source should be removed or
     /// `true` to keep it.
-    fn dispatch<F: FnMut() -> bool>(&self, source: &Source<Self>, callback: F) -> bool;
+    fn dispatch(&self,
+                source: &Source<Self>,
+                f: glib_sys::GSourceFunc,
+                data: glib_sys::gpointer) -> bool;
+
+    /// Returns an FFI function pointer to invoke the closure specified.
+    ///
+    /// This is used to implement the `set_callback` function.
+    fn g_source_func<F>() -> glib_sys::GSourceFunc
+        where F: FnMut(Self::CallbackArg) -> bool;
 }
 
 unsafe extern fn prepare<T: SourceFuncs>(source: *mut glib_sys::GSource,
@@ -619,24 +720,19 @@ unsafe extern fn check<T: SourceFuncs>(source: *mut glib_sys::GSource) -> glib_s
     }
 }
 
-unsafe extern fn dispatch<T: SourceFuncs>(source: *mut glib_sys::GSource, source_func: glib_sys::GSourceFunc, data: glib_sys::gpointer) -> glib_sys::gboolean {
+unsafe extern fn dispatch<T: SourceFuncs>(source: *mut glib_sys::GSource,
+                                          source_func: glib_sys::GSourceFunc,
+                                          data: glib_sys::gpointer)
+                                          -> glib_sys::gboolean {
     // TODO: needs a bomb to abort on panic
     let inner = source as *mut Inner<T>;
     let source = ManuallyDrop::new(Source {
         inner: source,
         _marker: marker::PhantomData,
     });
-    if (*inner).data.dispatch(source.get_ref(), || {
-        if let Some(source_func) = source_func {
-            source_func(data) != 0
-        }
-        else {
-            true
-        }
-    }) {
+    if (*inner).data.dispatch(source.get_ref(), source_func, data) {
         1
-    }
-    else {
+    } else {
         0
     }
 }

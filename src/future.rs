@@ -3,10 +3,11 @@ use std::iter::Peekable;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
-use futures::{Async, Future, IntoFuture};
 use futures::executor::{Spawn, Unpark, spawn};
 use futures::future;
 use futures::sync::mpsc;
+use futures::{Future, IntoFuture, Async};
+use glib_sys;
 use slab::Slab;
 
 use super::{MainContext, Source, SourceFuncs};
@@ -78,6 +79,8 @@ impl Executor {
 }
 
 impl SourceFuncs for Inner {
+    type CallbackArg = ();
+
     fn prepare(&self, _source: &Source<Self>) -> (bool, Option<Duration>) {
         (false, None)
     }
@@ -89,9 +92,10 @@ impl SourceFuncs for Inner {
         pending.peek().is_some()
     }
 
-    fn dispatch<F: FnMut() -> bool>(&self,
-                                    source: &Source<Self>,
-                                    _callback: F) -> bool {
+    fn dispatch(&self,
+                source: &Source<Self>,
+                _fnptr: glib_sys::GSourceFunc,
+                _data: glib_sys::gpointer) -> bool {
         let cx = source.context().expect("no context in dispatch");
         for index in self.pending.borrow_mut().by_ref() {
             if index == self.id {
@@ -142,6 +146,19 @@ impl SourceFuncs for Inner {
             }
         }
         true
+    }
+
+    fn g_source_func<F>() -> glib_sys::GSourceFunc
+        where F: FnMut(()) -> bool,
+    {
+        unsafe extern fn call<F>(data: glib_sys::gpointer) -> glib_sys::gboolean
+            where F: FnMut(()) -> bool,
+        {
+            // TODO: needs a bomb to abort on panic
+            if (*(data as *mut F))(()) { 1 } else { 0 }
+        }
+
+        Some(call::<F>)
     }
 }
 

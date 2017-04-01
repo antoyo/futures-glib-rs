@@ -1,13 +1,22 @@
-use std::net::TcpStream;
+use std::ffi::{CStr, CString};
 use std::io::{self, Read, Write};
+use std::mem;
+use std::net::TcpStream;
+use std::str;
+use std::time::Duration;
 
 use glib_sys;
 
 use error;
-use Source;
+use {Source, SourceFuncs};
 
+/// Wrapper around the underlying glib `GIOChannel` type
 pub struct IoChannel {
     inner: *mut glib_sys::GIOChannel,
+}
+
+/// Marker struct on the source returned from `create_watch`.
+pub struct IoChannelFuncs {
 }
 
 impl IoChannel {
@@ -96,11 +105,46 @@ impl IoChannel {
     /// On Windows, polling a `Source` created to watch a channel for a socket
     /// puts the socket in non-blocking mode. This is a side-effect of the
     /// implementation and unavoidable.
-    pub fn create_watch(&self, condition: IoCondition) -> Source<()> {
+    pub fn create_watch(&self, condition: &IoCondition) -> Source<IoChannelFuncs> {
         unsafe {
             let ptr = glib_sys::g_io_create_watch(self.inner, condition.bits);
             assert!(!ptr.is_null());
             ::source_new(ptr)
+        }
+    }
+
+    /// Gets the encoding for the input/output of the channel.
+    ///
+    /// The internal encoding is always UTF-8. The encoding `None` makes the
+    /// channel safe for binary data.
+    pub fn encoding(&self) -> Option<&str> {
+        unsafe {
+            let ptr = glib_sys::g_io_channel_get_encoding(self.inner);
+            if ptr.is_null() {
+                None
+            } else {
+                Some(str::from_utf8(CStr::from_ptr(ptr).to_bytes()).unwrap())
+            }
+        }
+    }
+
+    /// Sets the encoding for the input/output of the channel. The internal
+    /// encoding is always UTF-8. The default encoding for the external file is
+    /// UTF-8.
+    ///
+    /// The encoding `None` is safe to use with binary data.
+    pub fn set_encoding(&self, encoding: Option<&str>) -> io::Result<()> {
+        unsafe {
+            let mut error = 0 as *mut _;
+            let encoding = match encoding {
+                Some(s) => Some(CString::new(s)?),
+                None => None,
+            };
+            let encoding = encoding.as_ref().map(|c| c.as_ptr()).unwrap_or(0 as *const _);
+            let r = glib_sys::g_io_channel_set_encoding(self.inner,
+                                                        encoding,
+                                                        &mut error);
+            rc(r, None, error).map(|_| ())
         }
     }
 }
@@ -139,6 +183,12 @@ unsafe fn rc(rc: glib_sys::GIOStatus,
 
 impl Read for IoChannel {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        <&IoChannel>::read(&mut &*self, buf)
+    }
+}
+
+impl<'a> Read for &'a IoChannel {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         unsafe {
             let mut read = 0;
             let mut error = 0 as *mut _;
@@ -153,6 +203,16 @@ impl Read for IoChannel {
 }
 
 impl Write for IoChannel {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        <&IoChannel>::write(&mut &*self, buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        <&IoChannel>::flush(&mut &*self)
+    }
+}
+
+impl<'a> Write for &'a IoChannel {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         unsafe {
             let mut written = 0;
@@ -223,8 +283,17 @@ impl Drop for IoChannel {
 
 /// A bitwise combination representing a condition to watch for on an event
 /// source.
+#[derive(Debug, Clone)]
 pub struct IoCondition {
     bits: glib_sys::GIOCondition,
+}
+
+pub fn bits(condition: &IoCondition) -> glib_sys::GIOCondition {
+    condition.bits
+}
+
+pub fn bits_new(bits: glib_sys::GIOCondition) -> IoCondition {
+    IoCondition { bits: bits }
 }
 
 impl IoCondition {
@@ -245,6 +314,16 @@ impl IoCondition {
         self.flag(output, glib_sys::G_IO_OUT)
     }
 
+    /// Tests whether this condition indicates input readiness
+    pub fn is_input(&self) -> bool {
+        self.bits.contains(glib_sys::G_IO_IN)
+    }
+
+    /// Tests whether this condition indicates output readiness
+    pub fn is_output(&self) -> bool {
+        self.bits.contains(glib_sys::G_IO_OUT)
+    }
+
     fn flag(&mut self, enabled: bool, flag: glib_sys::GIOCondition) -> &mut IoCondition {
         if enabled {
             self.bits = self.bits | flag;
@@ -255,3 +334,63 @@ impl IoCondition {
     }
 }
 
+impl SourceFuncs for IoChannelFuncs {
+    // TODO: this should be &IoChannel and &IoCondition
+    type CallbackArg = (IoChannel, IoCondition);
+
+    fn prepare(&self, _source: &Source<Self>) -> (bool, Option<Duration>) {
+        panic!()
+    }
+
+    fn check(&self, _source: &Source<Self>) -> bool {
+        panic!()
+    }
+
+    fn dispatch(&self,
+                _source: &Source<Self>,
+                _fnptr: glib_sys::GSourceFunc,
+                _data: glib_sys::gpointer) -> bool {
+        panic!()
+    }
+
+    fn g_source_func<F>() -> glib_sys::GSourceFunc
+        where F: FnMut((IoChannel, IoCondition)) -> bool,
+    {
+        unsafe extern fn call<F>(channel: *mut glib_sys::GIOChannel,
+                                 condition: glib_sys::GIOCondition,
+                                 data: glib_sys::gpointer) -> glib_sys::gboolean
+            where F: FnMut((IoChannel, IoCondition)) -> bool,
+        {
+            // TODO: needs a bomb to abort on panic
+            let channel = IoChannel {
+                inner: glib_sys::g_io_channel_ref(channel),
+            };
+            let condition = IoCondition { bits: condition };
+            if (*(data as *mut F))((channel, condition)) { 1 } else { 0 }
+        }
+
+        let call: glib_sys::GIOFunc = Some(call::<F>);
+
+        unsafe {
+            mem::transmute(call)
+        }
+    }
+
+}
+
+#[cfg(unix)]
+mod unix {
+    use std::os::unix::prelude::*;
+
+    use glib_sys;
+
+    use IoChannel;
+
+    impl AsRawFd for IoChannel {
+        fn as_raw_fd(&self) -> RawFd {
+            unsafe {
+                glib_sys::g_io_channel_unix_get_fd(self.inner)
+            }
+        }
+    }
+}
