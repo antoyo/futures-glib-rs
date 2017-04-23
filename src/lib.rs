@@ -26,6 +26,8 @@ use std::ptr;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
+use futures::Future;
+use futures::future::Spawn;
 use libc::{c_int, c_uint};
 
 pub use future::{Executor, Remote};
@@ -60,6 +62,16 @@ impl<T> Drop for ManuallyDrop<T> {
 /// Binding to the underlying `GMainContext` type.
 pub struct MainContext {
     inner: *mut glib_sys::GMainContext,
+}
+
+impl<F> Spawn<F> for MainContext
+    where F: Future<Item=(), Error=()> + 'static
+{
+    fn spawn(&self, future: F) {
+        let ex = Executor::new();
+        ex.attach(self);
+        ex.spawn(future);
+    }
 }
 
 unsafe impl Send for MainContext {}
