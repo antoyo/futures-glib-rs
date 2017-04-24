@@ -114,3 +114,28 @@ fn spawn_in_pol() {
     lp.run();
     e.destroy();
 }
+
+#[test]
+fn unpark_after_done() {
+    use futures::task;
+
+    let cx = MainContext::new();
+    let lp = MainLoop::new(Some(&cx));
+    let e = Executor::new();
+    e.attach(&cx);
+
+    let e2 = e.clone();
+    let lp2 = lp.clone();
+    e.spawn_fn(move || {
+        let task = task::park();
+        e2.spawn_fn(move || {
+            task.unpark();
+            lp2.quit();
+            Ok(())
+        });
+        Ok(())
+    });
+
+    lp.run();
+    e.destroy();
+}

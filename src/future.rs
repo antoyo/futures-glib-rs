@@ -103,7 +103,10 @@ impl SourceFuncs for Inner {
             }
             let (task, wake) = {
                 let mut queue = self.queue.borrow_mut();
-                let slot = &mut queue[index];
+                let slot = match queue.get_mut(index) {
+                    Some(slot) => slot,
+                    None => continue,
+                };
                 if slot.unpark.is_none() {
                     slot.unpark = Some(Arc::new(MyUnpark {
                         id: index,
