@@ -27,7 +27,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use futures::Future;
-use futures::future::Spawn;
+use futures::future::{Spawn, SpawnError};
 use libc::{c_int, c_uint};
 
 pub use future::{Executor, Remote};
@@ -67,10 +67,11 @@ pub struct MainContext {
 impl<F> Spawn<F> for MainContext
     where F: Future<Item=(), Error=()> + 'static
 {
-    fn spawn(&self, future: F) {
+    fn spawn(&self, future: F) -> Result<(), SpawnError<F>> {
         let ex = Executor::new();
         ex.attach(self);
         ex.spawn(future);
+        Ok(())
     }
 }
 
