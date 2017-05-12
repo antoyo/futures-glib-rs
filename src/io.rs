@@ -1,6 +1,7 @@
 use std::ffi::{CStr, CString};
 use std::io::{self, Read, Write};
 use std::mem;
+use std::os::unix::io::RawFd;
 use std::net::TcpStream;
 use std::str;
 use std::time::Duration;
@@ -15,11 +16,23 @@ pub struct IoChannel {
     inner: *mut glib_sys::GIOChannel,
 }
 
+unsafe impl Send for IoChannel {} // FIXME: probably wrong
+
 /// Marker struct on the source returned from `create_watch`.
 pub struct IoChannelFuncs {
 }
 
 impl IoChannel {
+    pub fn unix_new(fd: RawFd) -> Self {
+        let ptr = unsafe {
+            glib_sys::g_io_channel_unix_new(fd)
+        };
+        assert!(!ptr.is_null());
+        IoChannel {
+            inner: ptr,
+        }
+    }
+
     /// Gets the internal buffer size.
     pub fn buffer_size(&self) -> usize {
         unsafe {

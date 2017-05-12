@@ -5,6 +5,7 @@ use std::net::SocketAddr;
 use std::os::unix::prelude::*;
 use std::time::Duration;
 
+use bytes::{Buf, BufMut};
 use futures::task::{self, Task};
 
 use futures::{Future, Poll, Async};
@@ -115,6 +116,39 @@ impl TcpStream {
             self.inner.unix_modify_fd(token, &active);
         }
     }
+
+    /// Test whether this socket is ready to be read or not.
+    ///
+    /// If the socket is *not* readable then the current task is scheduled to
+    /// get a notification when the socket does become readable. That is, this
+    /// is only suitable for calling in a `Future::poll` method and will
+    /// automatically handle ensuring a retry once the socket is readable again.
+    pub fn poll_read(&self) -> Async<()> {
+        // FIXME: probably needs to only check read.
+        if self.inner.get_ref().check(&self.inner) {
+            Async::Ready(())
+        }
+        else {
+            Async::NotReady
+        }
+    }
+
+    /// Tests to see if this source is ready to be written to or not.
+    ///
+    /// If this stream is not ready for a write then `NotReady` will be returned
+    /// and the current task will be scheduled to receive a notification when
+    /// the stream is writable again. In other words, this method is only safe
+    /// to call from within the context of a future's task, typically done in a
+    /// `Future::poll` method.
+    pub fn poll_write(&self) -> Async<()> {
+        // FIXME: probably needs to only check write.
+        if self.inner.get_ref().check(&self.inner) {
+            Async::Ready(())
+        }
+        else {
+            Async::NotReady
+        }
+    }
 }
 
 impl Read for TcpStream {
@@ -174,12 +208,52 @@ impl<'a> Write for &'a TcpStream {
 }
 
 impl AsyncRead for TcpStream {
+    unsafe fn prepare_uninitialized_buffer(&self, _: &mut [u8]) -> bool {
+        false
+    }
+
+    fn read_buf<B: BufMut>(&mut self, buf: &mut B) -> Poll<usize, io::Error> {
+        if let Async::NotReady = <TcpStream>::poll_read(self) {
+            return Ok(Async::NotReady)
+        }
+        let r = (&self.inner.get_ref().channel).read(unsafe { buf.bytes_mut() });
+
+        match r {
+            Ok(n) => {
+                unsafe { buf.advance_mut(n); }
+                Ok(Async::Ready(n))
+            }
+            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                self.block(IoCondition::new().input(true));
+                Ok(Async::NotReady)
+            }
+            Err(e) => Err(e),
+        }
+    }
 }
 
 impl AsyncWrite for TcpStream {
     fn shutdown(&mut self) -> Poll<(), io::Error> {
         try_nb!(self.flush());
         Ok(().into())
+    }
+
+    fn write_buf<B: Buf>(&mut self, buf: &mut B) -> Poll<usize, io::Error> {
+        if let Async::NotReady = <TcpStream>::poll_write(self) {
+            return Ok(Async::NotReady)
+        }
+        let r = (&self.inner.get_ref().channel).write(buf.bytes());
+        match r {
+            Ok(n) => {
+                buf.advance(n);
+                Ok(Async::Ready(n))
+            }
+            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                self.block(IoCondition::new().output(true));
+                Ok(Async::NotReady)
+            }
+            Err(e) => Err(e),
+        }
     }
 }
 

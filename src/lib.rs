@@ -1,5 +1,6 @@
 //! A crate to bring a `futures` executor to the glib event loop
 
+extern crate bytes;
 extern crate futures;
 extern crate glib_sys;
 extern crate libc;
