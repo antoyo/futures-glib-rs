@@ -6,5 +6,5 @@ jobs:
             - image: scorpil/rust:1.18
         steps:
             - checkout
-            - run: sudo apt-get install libgtk-3-dev
+            - run: apt-get install libgtk-3-dev
             - run: cargo test
