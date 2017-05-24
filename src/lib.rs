@@ -28,7 +28,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use futures::Future;
-use futures::future::{Spawn, SpawnError};
+use futures::future::ExecuteError;
 use libc::{c_int, c_uint};
 
 pub use future::{Executor, Remote};
@@ -65,10 +65,10 @@ pub struct MainContext {
     inner: *mut glib_sys::GMainContext,
 }
 
-impl<F> Spawn<F> for MainContext
+impl<F> futures::future::Executor<F> for MainContext
     where F: Future<Item=(), Error=()> + 'static
 {
-    fn spawn(&self, future: F) -> Result<(), SpawnError<F>> {
+    fn execute(&self, future: F) -> Result<(), ExecuteError<F>> {
         let ex = Executor::new();
         ex.attach(self);
         ex.spawn(future);
