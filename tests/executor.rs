@@ -127,9 +127,9 @@ fn unpark_after_done() {
     let e2 = e.clone();
     let lp2 = lp.clone();
     e.spawn_fn(move || {
-        let task = task::park();
+        let task = task::current();
         e2.spawn_fn(move || {
-            task.unpark();
+            task.notify();
             lp2.quit();
             Ok(())
         });

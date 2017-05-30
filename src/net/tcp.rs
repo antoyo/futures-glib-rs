@@ -101,10 +101,10 @@ impl TcpStream {
         let inner = self.inner.get_ref();
         let mut active = inner.active.borrow_mut();
         if condition.is_input() {
-            *inner.read.borrow_mut() = State::Blocked(task::park());
+            *inner.read.borrow_mut() = State::Blocked(task::current());
             active.input(true);
         } else {
-            *inner.write.borrow_mut() = State::Blocked(task::park());
+            *inner.write.borrow_mut() = State::Blocked(task::current());
             active.output(true);
         }
 
@@ -280,7 +280,7 @@ impl State {
             State::Ready => false,
             State::Blocked(_) |
             State::NotReady => {
-                *self = State::Blocked(task::park());
+                *self = State::Blocked(task::current());
                 true
             }
         }
@@ -335,14 +335,14 @@ impl SourceFuncs for Inner {
         // Wake up the read/write tasks as appropriate
         if ready.is_input() {
             if let Some(task) = self.read.borrow_mut().unblock() {
-                task.unpark();
+                task.notify();
             }
             active.input(false);
         }
 
         if ready.is_output() {
             if let Some(task) = self.write.borrow_mut().unblock() {
-                task.unpark();
+                task.notify();
             }
             active.output(false);
         }

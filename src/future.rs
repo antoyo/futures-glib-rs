@@ -3,7 +3,7 @@ use std::iter::Peekable;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
-use futures::executor::{Spawn, Unpark, spawn};
+use futures::executor::{Notify, Spawn, spawn};
 use futures::future;
 use futures::sync::mpsc;
 use futures::{Future, IntoFuture, Async};
@@ -107,20 +107,20 @@ impl SourceFuncs for Inner {
                     Some(slot) => slot,
                     None => continue,
                 };
-                if slot.unpark.is_none() {
-                    slot.unpark = Some(Arc::new(MyUnpark {
+                if slot.notifier.is_none() {
+                    slot.notifier = Some(Arc::new(Notifier {
                         id: index,
                         ready_queue: Arc::downgrade(&self.ready_queue),
                         main_context: cx.clone(),
                     }));
                 }
-                (slot.future.take(), slot.unpark.as_ref().unwrap().clone())
+                (slot.future.take(), slot.notifier.as_ref().unwrap().clone())
             };
             let mut task = match task {
                 Some(future) => future,
                 None => continue,
             };
-            let res = task.poll_future(wake);
+            let res = task.poll_future_notify(&wake, wake.id);
             let mut queue = self.queue.borrow_mut();
             match res {
                 Ok(Async::NotReady) => { queue[index].future = Some(task); }
@@ -132,16 +132,16 @@ impl SourceFuncs for Inner {
             let wake = {
                 let mut queue = self.queue.borrow_mut();
                 let slot = &mut queue[self.id];
-                if slot.unpark.is_none() {
-                    slot.unpark = Some(Arc::new(MyUnpark {
+                if slot.notifier.is_none() {
+                    slot.notifier = Some(Arc::new(Notifier {
                         id: self.id,
                         ready_queue: Arc::downgrade(&self.ready_queue),
                         main_context: cx.clone(),
                     }));
                 }
-                slot.unpark.as_ref().unwrap().clone()
+                slot.notifier.as_ref().unwrap().clone()
             };
-            if let Ok(Async::Ready(Some(Run(r)))) = (*self.message_queue.borrow_mut()).poll_stream(wake) {
+            if let Ok(Async::Ready(Some(Run(r)))) = (*self.message_queue.borrow_mut()).poll_stream_notify(&wake, wake.id) {
                 r.call_box(source);
             }
             else {
@@ -176,7 +176,7 @@ struct Inner {
 
 struct Task {
     future: Option<Spawn<Box<Future<Item=(), Error=()>>>>,
-    unpark: Option<Arc<Unpark>>,
+    notifier: Option<Arc<Notifier>>,
 }
 
 impl Inner {
@@ -187,7 +187,7 @@ impl Inner {
             let entry = queue.vacant_entry().unwrap();
             let index = entry.index();
             entry.insert(Task {
-                unpark: None,
+                notifier: None,
                 future: None,
             });
             index
@@ -213,7 +213,7 @@ impl Inner {
         let entry = queue.vacant_entry().unwrap();
         let index = entry.index();
         entry.insert(Task {
-            unpark: None,
+            notifier: None,
             future: Some(spawn(Box::new(future))),
         });
         self.ready_queue.push(index);
@@ -223,16 +223,16 @@ impl Inner {
     }
 }
 
-struct MyUnpark {
+struct Notifier {
     id: usize,
     main_context: MainContext,
     ready_queue: Weak<Stack<usize>>,
 }
 
-impl Unpark for MyUnpark {
-    fn unpark(&self) {
+impl Notify for Notifier {
+    fn notify(&self, id: usize) {
         if let Some(queue) = self.ready_queue.upgrade() {
-            queue.push(self.id);
+            queue.push(id);
             self.main_context.wakeup();
         }
     }

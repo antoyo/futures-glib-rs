@@ -11,7 +11,6 @@ slab = "^0.3.0"
 tokio-io = "0.1"
 
 [dependencies.futures]
-branch = "spawn-trait"
 git = "https://github.com/alexcrichton/futures-rs"
 
 [dependencies.glib-sys]
@@ -24,5 +23,4 @@ gtk = "0.1"
 [replace]
 
 [replace."futures:0.1.13"]
-branch = "spawn-trait"
 git = "https://github.com/alexcrichton/futures-rs"

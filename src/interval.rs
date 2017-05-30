@@ -1,8 +1,7 @@
-use std::sync::Arc;
 use std::time::Duration;
 
 use futures::{Async, Stream};
-use futures::executor::{Spawn, Unpark, spawn};
+use futures::executor::{Notify, NotifyHandle, Spawn, spawn};
 use futures::sync::mpsc;
 use glib_sys;
 use glib_sys::{gboolean, gpointer, g_timeout_add_full};
@@ -44,17 +43,22 @@ impl Stream for Interval {
     }
 }
 
-pub struct NoOp {
-}
+fn notify_noop() -> NotifyHandle {
+    struct Noop;
 
-impl Unpark for NoOp {
-    fn unpark(&self) {}
+    impl Notify for Noop {
+        fn notify(&self, _id: usize) {}
+    }
+
+    const NOOP : &'static Noop = &Noop;
+
+    NotifyHandle::from(NOOP)
 }
 
 unsafe extern fn handler(data: gpointer) -> gboolean {
     let tx = data as *mut Spawn<mpsc::Sender<()>>;
-    let no_op = Arc::new(NoOp {}) as Arc<Unpark>;
-    drop((*tx).start_send((), &no_op));
+    let notify = notify_noop();
+    drop((*tx).start_send_notify((), &notify, 0));
     1
 }
 
