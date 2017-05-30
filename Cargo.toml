@@ -5,13 +5,11 @@ version = "0.1.0"
 
 [dependencies]
 bytes = "^0.4.2"
+futures = "^0.1.14"
 libc = "^0.2.2"
 net2 = "0.2"
 slab = "^0.3.0"
 tokio-io = "0.1"
-
-[dependencies.futures]
-git = "https://github.com/alexcrichton/futures-rs"
 
 [dependencies.glib-sys]
 features = ["v2_36"]
@@ -19,8 +17,3 @@ version = "0.3"
 
 [dev-dependencies]
 gtk = "0.1"
-
-[replace]
-
-[replace."futures:0.1.13"]
-git = "https://github.com/alexcrichton/futures-rs"
