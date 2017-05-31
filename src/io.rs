@@ -1,10 +1,13 @@
 use std::ffi::{CStr, CString};
 use std::io::{self, Read, Write};
 use std::mem;
+#[cfg(unix)]
 use std::os::unix::io::RawFd;
 use std::net::TcpStream;
 use std::str;
 use std::time::Duration;
+
+use libc::c_int;
 
 use glib_sys;
 
@@ -267,7 +270,7 @@ impl From<TcpStream> for IoChannel {
         use std::os::windows::prelude::*;
 
         let ptr = unsafe {
-            glib_sys::g_io_channel_win32_new_socket(socket.into_raw_socket())
+            g_io_channel_win32_new_socket(socket.into_raw_socket())
         };
         assert!(!ptr.is_null());
         IoChannel {
@@ -275,6 +278,9 @@ impl From<TcpStream> for IoChannel {
         }
     }
 }
+
+#[cfg(windows)]
+unsafe extern "C" g_io_channel_win32_new_socket(socket: c_int) -> *mut GIOChannel;
 
 impl Clone for IoChannel {
     fn clone(&self) -> IoChannel {

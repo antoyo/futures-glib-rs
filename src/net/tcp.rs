@@ -2,11 +2,16 @@ use std::cell::RefCell;
 use std::io::{self, Read, Write};
 use std::mem;
 use std::net::SocketAddr;
+#[cfg(unix)]
 use std::os::unix::prelude::*;
 use std::time::Duration;
 
 use bytes::{Buf, BufMut};
 use futures::task::{self, Task};
+#[cfg(unix)]
+use libc::EINPROGRESS;
+#[cfg(windows)]
+use libc::WSAEINPROGRESS as EINPROGRESS;
 
 use futures::{Future, Poll, Async};
 use glib_sys;
@@ -14,7 +19,9 @@ use libc;
 use net2::{TcpBuilder, TcpStreamExt};
 use tokio_io::{AsyncRead, AsyncWrite};
 
-use {Source, SourceFuncs, IoChannel, IoCondition, MainContext, UnixToken};
+use {Source, SourceFuncs, IoChannel, IoCondition, MainContext};
+#[cfg(unix)]
+use UnixToken;
 
 /// A raw TCP byte stream connected to a remote address.
 pub struct TcpStream {
@@ -57,7 +64,7 @@ impl TcpStream {
             socket.set_nonblocking(true)?;
             match socket.connect(addr) {
                 Ok(..) => {}
-                Err(ref e) if e.raw_os_error() == Some(libc::EINPROGRESS) => {}
+                Err(ref e) if e.raw_os_error() == Some(EINPROGRESS) => {}
                 Err(e) => return Err(e),
             }
 
