@@ -17,7 +17,8 @@ use glib_sys;
 use net2::{TcpBuilder, TcpStreamExt};
 use tokio_io::{AsyncRead, AsyncWrite};
 
-use {Source, SourceFuncs, State, IoChannel, IoCondition, MainContext};
+use {Source, SourceFuncs, IoChannel, IoCondition, MainContext};
+use io::state::State;
 #[cfg(unix)]
 use UnixToken;
 #[cfg(windows)]

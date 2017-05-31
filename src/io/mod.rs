@@ -1,22 +1,19 @@
-#[cfg(windows)]
-use std::cell::RefCell;
+pub mod state;
+
 use std::ffi::{CStr, CString};
 use std::io::{self, Read, Write};
-use std::mem;
 #[cfg(unix)]
 use std::os::unix::io::RawFd;
 use std::net::TcpStream;
 use std::ptr;
 use std::str;
-use std::time::Duration;
 
 use glib_sys;
 
 use error;
-use {Source, SourceFuncs};
-#[cfg(windows)]
-use State;
+use Source;
 use super::Inner;
+use self::state::IoChannelFuncs;
 
 /// Wrapper around the underlying glib `GIOChannel` type
 pub struct IoChannel {
@@ -24,14 +21,6 @@ pub struct IoChannel {
 }
 
 unsafe impl Send for IoChannel {} // FIXME: probably wrong
-
-/// Marker struct on the source returned from `create_watch`.
-pub struct IoChannelFuncs {
-    #[cfg(windows)]
-    pub channel: IoChannel,
-    #[cfg(windows)]
-    pub write: RefCell<State>,
-}
 
 impl IoChannel {
     #[cfg(unix)]
@@ -134,17 +123,7 @@ impl IoChannel {
         unsafe {
             let ptr = glib_sys::g_io_create_watch(self.inner, condition.bits);
             assert!(!ptr.is_null());
-            #[cfg(windows)]
-            let channel_funcs =
-                IoChannelFuncs {
-                    channel: self.clone(),
-                    write: RefCell::new(State::NotReady),
-                };
-            #[cfg(unix)]
-            let channel_funcs =
-                IoChannelFuncs {
-                };
-            ptr::write(&mut (*(ptr as *mut Inner<IoChannelFuncs>)).data, channel_funcs);
+            ptr::write(&mut (*(ptr as *mut Inner<IoChannelFuncs>)).data, IoChannelFuncs::new(self.clone()));
             ::source_new(ptr)
         }
     }
@@ -373,50 +352,6 @@ impl IoCondition {
         }
         self
     }
-}
-
-impl SourceFuncs for IoChannelFuncs {
-    // TODO: this should be &IoChannel and &IoCondition
-    type CallbackArg = (IoChannel, IoCondition);
-
-    fn prepare(&self, _source: &Source<Self>) -> (bool, Option<Duration>) {
-        panic!()
-    }
-
-    fn check(&self, _source: &Source<Self>) -> bool {
-        panic!()
-    }
-
-    fn dispatch(&self,
-                _source: &Source<Self>,
-                _fnptr: glib_sys::GSourceFunc,
-                _data: glib_sys::gpointer) -> bool {
-        panic!()
-    }
-
-    fn g_source_func<F>() -> glib_sys::GSourceFunc
-        where F: FnMut((IoChannel, IoCondition)) -> bool,
-    {
-        unsafe extern fn call<F>(channel: *mut glib_sys::GIOChannel,
-                                 condition: glib_sys::GIOCondition,
-                                 data: glib_sys::gpointer) -> glib_sys::gboolean
-            where F: FnMut((IoChannel, IoCondition)) -> bool,
-        {
-            // TODO: needs a bomb to abort on panic
-            let channel = IoChannel {
-                inner: glib_sys::g_io_channel_ref(channel),
-            };
-            let condition = IoCondition { bits: condition };
-            if (*(data as *mut F))((channel, condition)) { 1 } else { 0 }
-        }
-
-        let call: glib_sys::GIOFunc = Some(call::<F>);
-
-        unsafe {
-            mem::transmute(call)
-        }
-    }
-
 }
 
 #[cfg(unix)]
