@@ -24,6 +24,7 @@ pub struct IoChannelFuncs {
 }
 
 impl IoChannel {
+    #[cfg(unix)]
     pub fn unix_new(fd: RawFd) -> Self {
         let ptr = unsafe {
             glib_sys::g_io_channel_unix_new(fd)
@@ -268,7 +269,7 @@ impl From<TcpStream> for IoChannel {
         use std::os::windows::prelude::*;
 
         let ptr = unsafe {
-            g_io_channel_win32_new_socket(socket.into_raw_socket())
+            g_io_channel_win32_new_socket(socket.into_raw_socket() as i32)
         };
         assert!(!ptr.is_null());
         IoChannel {

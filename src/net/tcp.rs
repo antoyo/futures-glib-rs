@@ -11,11 +11,10 @@ use futures::task::{self, Task};
 #[cfg(unix)]
 use libc::EINPROGRESS;
 #[cfg(windows)]
-use libc::WSAEINPROGRESS as EINPROGRESS;
+use winapi::WSAEINPROGRESS as EINPROGRESS;
 
 use futures::{Future, Poll, Async};
 use glib_sys;
-use libc;
 use net2::{TcpBuilder, TcpStreamExt};
 use tokio_io::{AsyncRead, AsyncWrite};
 
@@ -23,11 +22,40 @@ use {Source, SourceFuncs, IoChannel, IoCondition, MainContext};
 #[cfg(unix)]
 use UnixToken;
 
-/// A raw TCP byte stream connected to a remote address.
-pub struct TcpStream {
-    inner: Source<Inner>,
+#[cfg(unix)]
+fn create_source(channel: IoChannel, active: IoCondition, context: &MainContext) -> Source<Inner> {
+    let fd = channel.as_raw_fd();
+    // Wrap the channel itself in a `Source` that we create and manage.
+    let src = Source::new(Inner {
+        channel: channel,
+        active: RefCell::new(active.clone()),
+        read: RefCell::new(State::NotReady),
+        write: RefCell::new(State::NotReady),
+        token: RefCell::new(None),
+    });
+    src.attach(context);
+
+    // And finally, add the file descriptor to the source so it knows
+    // what we're tracking.
+    let t = src.unix_add_fd(fd, &active);
+    *src.get_ref().token.borrow_mut() = Some(t);
+    src
 }
 
+#[cfg(windows)]
+fn create_source(channel: IoChannel, _active: IoCondition, _context: &MainContext) -> Source<IoChannelFuncs> {
+    channel.create_watch(&active)
+}
+
+/// A raw TCP byte stream connected to a remote address.
+pub struct TcpStream {
+    #[cfg(unix)]
+    inner: Source<Inner>,
+    #[cfg(windows)]
+    inner: Source<IoChannelFuncs>,
+}
+
+#[cfg(unix)]
 struct Inner {
     channel: IoChannel,
     active: RefCell<IoCondition>,
@@ -74,25 +102,11 @@ impl TcpStream {
             channel.set_close_on_drop(true);
             channel.set_encoding(None)?;
             channel.set_buffered(false);
-            let fd = channel.as_raw_fd();
 
             let mut active = IoCondition::new();
             active.input(true).output(true);
 
-            // Wrap the channel itself in a `Source` that we create and manage.
-            let src = Source::new(Inner {
-                channel: channel,
-                active: RefCell::new(active.clone()),
-                read: RefCell::new(State::NotReady),
-                write: RefCell::new(State::NotReady),
-                token: RefCell::new(None),
-            });
-            src.attach(context);
-
-            // And finally, add the file descriptor to the source so it knows
-            // what we're tracking.
-            let t = src.unix_add_fd(fd, &active);
-            *src.get_ref().token.borrow_mut() = Some(t);
+            let src = create_source(channel, active, context);
 
             Ok(TcpStream { inner: src })
         })();
@@ -104,6 +118,7 @@ impl TcpStream {
 
     /// Blocks the current future's task internally based on the `condition`
     /// specified.
+    #[cfg(unix)]
     fn block(&self, condition: &IoCondition) {
         let inner = self.inner.get_ref();
         let mut active = inner.active.borrow_mut();
@@ -115,13 +130,18 @@ impl TcpStream {
             active.output(true);
         }
 
-        // Be sure to update the IoCondition that we're interested so we can ge
+        // Be sure to update the IoCondition that we're interested so we can get
         // events related to this condition.
         let token = inner.token.borrow();
         let token = token.as_ref().unwrap();
         unsafe {
             self.inner.unix_modify_fd(token, &active);
         }
+    }
+
+    #[cfg(windows)]
+    fn block(&self, _condition: &IoCondition) {
+        // Nothing to do on Windows.
     }
 
     /// Test whether this socket is ready to be read or not.
@@ -309,6 +329,7 @@ impl State {
     }
 }
 
+#[cfg(unix)]
 impl SourceFuncs for Inner {
     type CallbackArg = ();
 
