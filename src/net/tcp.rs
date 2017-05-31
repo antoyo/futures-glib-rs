@@ -1,13 +1,12 @@
 use std::cell::RefCell;
 use std::io::{self, Read, Write};
-use std::mem;
 use std::net::SocketAddr;
 #[cfg(unix)]
 use std::os::unix::prelude::*;
 use std::time::Duration;
 
 use bytes::{Buf, BufMut};
-use futures::task::{self, Task};
+use futures::task;
 #[cfg(unix)]
 use libc::EINPROGRESS;
 #[cfg(windows)]
@@ -18,7 +17,7 @@ use glib_sys;
 use net2::{TcpBuilder, TcpStreamExt};
 use tokio_io::{AsyncRead, AsyncWrite};
 
-use {Source, SourceFuncs, IoChannel, IoCondition, MainContext};
+use {Source, SourceFuncs, State, IoChannel, IoCondition, MainContext};
 #[cfg(unix)]
 use UnixToken;
 #[cfg(windows)]
@@ -66,12 +65,6 @@ struct Inner {
     write: RefCell<State>,
 }
 
-enum State {
-    NotReady,
-    Ready,
-    Blocked(Task),
-}
-
 /// Future returned from `TcpStream::connect` representing a connecting TCP
 /// stream.
 pub struct TcpStreamConnect {
@@ -94,7 +87,7 @@ impl TcpStream {
             socket.set_nonblocking(true)?;
             match socket.connect(addr) {
                 Ok(..) => {}
-                Err(ref e) if e.raw_os_error() == Some(EINPROGRESS) => {}
+                Err(ref e) if e.raw_os_error() == Some(EINPROGRESS as i32) => {}
                 Err(e) => return Err(e),
             }
 
@@ -138,6 +131,14 @@ impl TcpStream {
         let token = token.as_ref().unwrap();
         unsafe {
             self.inner.unix_modify_fd(token, &active);
+        }
+    }
+
+    #[cfg(windows)]
+    fn block(&self, condition: &IoCondition) {
+        let inner = self.inner.get_ref();
+        if condition.is_output() {
+            *inner.write.borrow_mut() = State::Blocked(task::current());
         }
     }
 
@@ -303,34 +304,6 @@ impl Future for TcpStreamConnect {
         } else {
             // TODO: call take_error() and return that error if one exists
             Ok(stream.into())
-        }
-    }
-}
-
-impl State {
-    fn block(&mut self) -> bool {
-        match *self {
-            State::Ready => false,
-            State::Blocked(_) |
-            State::NotReady => {
-                *self = State::Blocked(task::current());
-                true
-            }
-        }
-    }
-
-    fn unblock(&mut self) -> Option<Task> {
-        match mem::replace(self, State::Ready) {
-            State::Ready |
-            State::NotReady => None,
-            State::Blocked(task) => Some(task),
-        }
-    }
-
-    fn is_blocked(&self) -> bool {
-        match *self {
-            State::Blocked(_) => true,
-            _ => false,
         }
     }
 }

@@ -1,9 +1,12 @@
+#[cfg(windows)]
+use std::cell::RefCell;
 use std::ffi::{CStr, CString};
 use std::io::{self, Read, Write};
 use std::mem;
 #[cfg(unix)]
 use std::os::unix::io::RawFd;
 use std::net::TcpStream;
+use std::ptr;
 use std::str;
 use std::time::Duration;
 
@@ -11,6 +14,9 @@ use glib_sys;
 
 use error;
 use {Source, SourceFuncs};
+#[cfg(windows)]
+use State;
+use super::Inner;
 
 /// Wrapper around the underlying glib `GIOChannel` type
 pub struct IoChannel {
@@ -21,6 +27,10 @@ unsafe impl Send for IoChannel {} // FIXME: probably wrong
 
 /// Marker struct on the source returned from `create_watch`.
 pub struct IoChannelFuncs {
+    #[cfg(windows)]
+    channel: IoChannel,
+    #[cfg(windows)]
+    write: RefCell<State>,
 }
 
 impl IoChannel {
@@ -124,6 +134,17 @@ impl IoChannel {
         unsafe {
             let ptr = glib_sys::g_io_create_watch(self.inner, condition.bits);
             assert!(!ptr.is_null());
+            #[cfg(windows)]
+            let channel_funcs =
+                IoChannelFuncs {
+                    channel: self.clone(),
+                    write: RefCell::new(State::NotReady),
+                };
+            #[cfg(unix)]
+            let channel_funcs =
+                IoChannelFuncs {
+                };
+            ptr::write(&mut (*(ptr as *mut Inner<IoChannelFuncs>)).data, channel_funcs);
             ::source_new(ptr)
         }
     }

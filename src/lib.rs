@@ -30,6 +30,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use futures::Future;
+use futures::task::{self, Task};
 use futures::future::ExecuteError;
 use libc::{c_int, c_uint};
 
@@ -763,4 +764,38 @@ unsafe extern fn finalize<T: SourceFuncs>(source: *mut glib_sys::GSource) {
     let source = source as *mut Inner<T>;
     ptr::read(&(*source).funcs);
     ptr::read(&(*source).data);
+}
+
+enum State {
+    NotReady,
+    Ready,
+    Blocked(Task),
+}
+
+impl State {
+    fn block(&mut self) -> bool {
+        match *self {
+            State::Ready => false,
+            State::Blocked(_) |
+            State::NotReady => {
+                *self = State::Blocked(task::current());
+                true
+            }
+        }
+    }
+
+    fn unblock(&mut self) -> Option<Task> {
+        match mem::replace(self, State::Ready) {
+            State::Ready |
+            State::NotReady => None,
+            State::Blocked(task) => Some(task),
+        }
+    }
+
+    fn is_blocked(&self) -> bool {
+        match *self {
+            State::Blocked(_) => true,
+            _ => false,
+        }
+    }
 }
