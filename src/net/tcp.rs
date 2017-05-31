@@ -21,6 +21,8 @@ use tokio_io::{AsyncRead, AsyncWrite};
 use {Source, SourceFuncs, IoChannel, IoCondition, MainContext};
 #[cfg(unix)]
 use UnixToken;
+#[cfg(windows)]
+use io::IoChannelFuncs;
 
 #[cfg(unix)]
 fn create_source(channel: IoChannel, active: IoCondition, context: &MainContext) -> Source<Inner> {
@@ -43,7 +45,7 @@ fn create_source(channel: IoChannel, active: IoCondition, context: &MainContext)
 }
 
 #[cfg(windows)]
-fn create_source(channel: IoChannel, _active: IoCondition, _context: &MainContext) -> Source<IoChannelFuncs> {
+fn create_source(channel: IoChannel, active: IoCondition, _context: &MainContext) -> Source<IoChannelFuncs> {
     channel.create_watch(&active)
 }
 
@@ -139,11 +141,6 @@ impl TcpStream {
         }
     }
 
-    #[cfg(windows)]
-    fn block(&self, _condition: &IoCondition) {
-        // Nothing to do on Windows.
-    }
-
     /// Test whether this socket is ready to be read or not.
     ///
     /// If the socket is *not* readable then the current task is scheduled to
@@ -189,8 +186,11 @@ impl<'a> Read for &'a TcpStream {
         match (&self.inner.get_ref().channel).read(buf) {
             Ok(n) => Ok(n),
             Err(e) => {
-                if e.kind() == io::ErrorKind::WouldBlock {
-                    self.block(IoCondition::new().input(true))
+                #[cfg(unix)]
+                {
+                    if e.kind() == io::ErrorKind::WouldBlock {
+                        self.block(IoCondition::new().input(true))
+                    }
                 }
                 Err(e)
             }
@@ -213,8 +213,11 @@ impl<'a> Write for &'a TcpStream {
         match (&self.inner.get_ref().channel).write(buf) {
             Ok(n) => Ok(n),
             Err(e) => {
-                if e.kind() == io::ErrorKind::WouldBlock {
-                    self.block(IoCondition::new().output(true))
+                #[cfg(unix)]
+                {
+                    if e.kind() == io::ErrorKind::WouldBlock {
+                        self.block(IoCondition::new().output(true))
+                    }
                 }
                 Err(e)
             }
@@ -225,8 +228,11 @@ impl<'a> Write for &'a TcpStream {
         match (&self.inner.get_ref().channel).flush() {
             Ok(n) => Ok(n),
             Err(e) => {
-                if e.kind() == io::ErrorKind::WouldBlock {
-                    self.block(IoCondition::new().output(true))
+                #[cfg(unix)]
+                {
+                    if e.kind() == io::ErrorKind::WouldBlock {
+                        self.block(IoCondition::new().output(true))
+                    }
                 }
                 Err(e)
             }

@@ -8,6 +8,8 @@ extern crate net2;
 extern crate slab;
 #[macro_use]
 extern crate tokio_io;
+#[cfg(windows)]
+extern crate winapi;
 
 #[macro_use]
 mod rt;
