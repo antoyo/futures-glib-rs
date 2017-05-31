@@ -13,7 +13,7 @@ use glib_sys;
 use error;
 use Source;
 use super::Inner;
-use self::state::IoChannelFuncs;
+pub use self::state::IoChannelFuncs;
 
 /// Wrapper around the underlying glib `GIOChannel` type
 pub struct IoChannel {

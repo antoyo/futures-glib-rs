@@ -55,7 +55,7 @@ impl IoChannelFuncs {
     #[cfg(windows)]
     pub fn new(channel: IoChannel) -> Self {
         IoChannelFuncs {
-            channel,
+            channel: channel,
             write: RefCell::new(State::NotReady),
         }
     }
