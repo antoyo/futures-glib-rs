@@ -280,7 +280,7 @@ impl From<TcpStream> for IoChannel {
 }
 
 #[cfg(windows)]
-unsafe extern "C" g_io_channel_win32_new_socket(socket: c_int) -> *mut GIOChannel;
+unsafe extern "C" fn g_io_channel_win32_new_socket(socket: c_int) -> *mut GIOChannel;
 
 impl Clone for IoChannel {
     fn clone(&self) -> IoChannel {
