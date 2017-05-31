@@ -28,9 +28,9 @@ unsafe impl Send for IoChannel {} // FIXME: probably wrong
 /// Marker struct on the source returned from `create_watch`.
 pub struct IoChannelFuncs {
     #[cfg(windows)]
-    channel: IoChannel,
+    pub channel: IoChannel,
     #[cfg(windows)]
-    write: RefCell<State>,
+    pub write: RefCell<State>,
 }
 
 impl IoChannel {
