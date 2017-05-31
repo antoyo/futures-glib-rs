@@ -7,8 +7,6 @@ use std::net::TcpStream;
 use std::str;
 use std::time::Duration;
 
-use libc::c_int;
-
 use glib_sys;
 
 use error;
@@ -280,7 +278,9 @@ impl From<TcpStream> for IoChannel {
 }
 
 #[cfg(windows)]
-unsafe extern "C" fn g_io_channel_win32_new_socket(socket: c_int) -> *mut GIOChannel;
+extern "C" {
+    fn g_io_channel_win32_new_socket(socket: ::libc::c_int) -> *mut glib_sys::GIOChannel;
+}
 
 impl Clone for IoChannel {
     fn clone(&self) -> IoChannel {
