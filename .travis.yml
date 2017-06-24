@@ -8,6 +8,7 @@ addons:
       - libelf-dev
       - libdw-dev
       - binutils-dev
+      - libgtk-3-dev
 
 rust:
   - nightly
