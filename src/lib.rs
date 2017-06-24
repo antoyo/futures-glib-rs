@@ -8,6 +8,8 @@ extern crate net2;
 extern crate slab;
 #[macro_use]
 extern crate tokio_io;
+#[cfg(windows)]
+extern crate winapi;
 
 #[macro_use]
 mod rt;
@@ -645,6 +647,7 @@ impl<T> Drop for Source<T> {
 #[cfg(unix)]
 pub struct UnixToken(glib_sys::gpointer);
 
+#[cfg(unix)]
 unsafe impl Send for UnixToken {}
 
 /// Trait for the callbacks that will be invoked by the `Source` type.

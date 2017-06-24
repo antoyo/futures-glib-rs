@@ -1,38 +1,69 @@
 use std::cell::RefCell;
 use std::io::{self, Read, Write};
-use std::mem;
 use std::net::SocketAddr;
+#[cfg(unix)]
 use std::os::unix::prelude::*;
 use std::time::Duration;
 
 use bytes::{Buf, BufMut};
-use futures::task::{self, Task};
+use futures::task;
+#[cfg(unix)]
+use libc::EINPROGRESS;
+#[cfg(windows)]
+use winapi::WSAEINPROGRESS as EINPROGRESS;
 
 use futures::{Future, Poll, Async};
 use glib_sys;
-use libc;
 use net2::{TcpBuilder, TcpStreamExt};
 use tokio_io::{AsyncRead, AsyncWrite};
 
-use {Source, SourceFuncs, IoChannel, IoCondition, MainContext, UnixToken};
+use {Source, SourceFuncs, IoChannel, IoCondition, MainContext};
+use io::state::State;
+#[cfg(unix)]
+use UnixToken;
+#[cfg(windows)]
+use io::IoChannelFuncs;
+
+#[cfg(unix)]
+fn create_source(channel: IoChannel, active: IoCondition, context: &MainContext) -> Source<Inner> {
+    let fd = channel.as_raw_fd();
+    // Wrap the channel itself in a `Source` that we create and manage.
+    let src = Source::new(Inner {
+        channel: channel,
+        active: RefCell::new(active.clone()),
+        read: RefCell::new(State::NotReady),
+        write: RefCell::new(State::NotReady),
+        token: RefCell::new(None),
+    });
+    src.attach(context);
+
+    // And finally, add the file descriptor to the source so it knows
+    // what we're tracking.
+    let t = src.unix_add_fd(fd, &active);
+    *src.get_ref().token.borrow_mut() = Some(t);
+    src
+}
+
+#[cfg(windows)]
+fn create_source(channel: IoChannel, active: IoCondition, _context: &MainContext) -> Source<IoChannelFuncs> {
+    channel.create_watch(&active)
+}
 
 /// A raw TCP byte stream connected to a remote address.
 pub struct TcpStream {
+    #[cfg(unix)]
     inner: Source<Inner>,
+    #[cfg(windows)]
+    inner: Source<IoChannelFuncs>,
 }
 
+#[cfg(unix)]
 struct Inner {
     channel: IoChannel,
     active: RefCell<IoCondition>,
     token: RefCell<Option<UnixToken>>,
     read: RefCell<State>,
     write: RefCell<State>,
-}
-
-enum State {
-    NotReady,
-    Ready,
-    Blocked(Task),
 }
 
 /// Future returned from `TcpStream::connect` representing a connecting TCP
@@ -57,7 +88,7 @@ impl TcpStream {
             socket.set_nonblocking(true)?;
             match socket.connect(addr) {
                 Ok(..) => {}
-                Err(ref e) if e.raw_os_error() == Some(libc::EINPROGRESS) => {}
+                Err(ref e) if e.raw_os_error() == Some(EINPROGRESS as i32) => {}
                 Err(e) => return Err(e),
             }
 
@@ -67,25 +98,11 @@ impl TcpStream {
             channel.set_close_on_drop(true);
             channel.set_encoding(None)?;
             channel.set_buffered(false);
-            let fd = channel.as_raw_fd();
 
             let mut active = IoCondition::new();
             active.input(true).output(true);
 
-            // Wrap the channel itself in a `Source` that we create and manage.
-            let src = Source::new(Inner {
-                channel: channel,
-                active: RefCell::new(active.clone()),
-                read: RefCell::new(State::NotReady),
-                write: RefCell::new(State::NotReady),
-                token: RefCell::new(None),
-            });
-            src.attach(context);
-
-            // And finally, add the file descriptor to the source so it knows
-            // what we're tracking.
-            let t = src.unix_add_fd(fd, &active);
-            *src.get_ref().token.borrow_mut() = Some(t);
+            let src = create_source(channel, active, context);
 
             Ok(TcpStream { inner: src })
         })();
@@ -97,6 +114,7 @@ impl TcpStream {
 
     /// Blocks the current future's task internally based on the `condition`
     /// specified.
+    #[cfg(unix)]
     fn block(&self, condition: &IoCondition) {
         let inner = self.inner.get_ref();
         let mut active = inner.active.borrow_mut();
@@ -108,12 +126,20 @@ impl TcpStream {
             active.output(true);
         }
 
-        // Be sure to update the IoCondition that we're interested so we can ge
+        // Be sure to update the IoCondition that we're interested so we can get
         // events related to this condition.
         let token = inner.token.borrow();
         let token = token.as_ref().unwrap();
         unsafe {
             self.inner.unix_modify_fd(token, &active);
+        }
+    }
+
+    #[cfg(windows)]
+    fn block(&self, condition: &IoCondition) {
+        let inner = self.inner.get_ref();
+        if condition.is_output() {
+            *inner.write.borrow_mut() = State::Blocked(task::current());
         }
     }
 
@@ -162,8 +188,11 @@ impl<'a> Read for &'a TcpStream {
         match (&self.inner.get_ref().channel).read(buf) {
             Ok(n) => Ok(n),
             Err(e) => {
-                if e.kind() == io::ErrorKind::WouldBlock {
-                    self.block(IoCondition::new().input(true))
+                #[cfg(unix)]
+                {
+                    if e.kind() == io::ErrorKind::WouldBlock {
+                        self.block(IoCondition::new().input(true))
+                    }
                 }
                 Err(e)
             }
@@ -186,8 +215,11 @@ impl<'a> Write for &'a TcpStream {
         match (&self.inner.get_ref().channel).write(buf) {
             Ok(n) => Ok(n),
             Err(e) => {
-                if e.kind() == io::ErrorKind::WouldBlock {
-                    self.block(IoCondition::new().output(true))
+                #[cfg(unix)]
+                {
+                    if e.kind() == io::ErrorKind::WouldBlock {
+                        self.block(IoCondition::new().output(true))
+                    }
                 }
                 Err(e)
             }
@@ -198,8 +230,11 @@ impl<'a> Write for &'a TcpStream {
         match (&self.inner.get_ref().channel).flush() {
             Ok(n) => Ok(n),
             Err(e) => {
-                if e.kind() == io::ErrorKind::WouldBlock {
-                    self.block(IoCondition::new().output(true))
+                #[cfg(unix)]
+                {
+                    if e.kind() == io::ErrorKind::WouldBlock {
+                        self.block(IoCondition::new().output(true))
+                    }
                 }
                 Err(e)
             }
@@ -274,34 +309,7 @@ impl Future for TcpStreamConnect {
     }
 }
 
-impl State {
-    fn block(&mut self) -> bool {
-        match *self {
-            State::Ready => false,
-            State::Blocked(_) |
-            State::NotReady => {
-                *self = State::Blocked(task::current());
-                true
-            }
-        }
-    }
-
-    fn unblock(&mut self) -> Option<Task> {
-        match mem::replace(self, State::Ready) {
-            State::Ready |
-            State::NotReady => None,
-            State::Blocked(task) => Some(task),
-        }
-    }
-
-    fn is_blocked(&self) -> bool {
-        match *self {
-            State::Blocked(_) => true,
-            _ => false,
-        }
-    }
-}
-
+#[cfg(unix)]
 impl SourceFuncs for Inner {
     type CallbackArg = ();
 
