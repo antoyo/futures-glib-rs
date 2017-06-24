@@ -5,6 +5,8 @@ use std::time::Duration;
 
 use futures::executor::{Notify, Spawn, spawn};
 use futures::future;
+use futures::future::ExecuteError;
+use futures::future::Executor as FutureExecutor;
 use futures::sync::mpsc;
 use futures::{Future, IntoFuture, Async};
 use glib_sys;
@@ -75,6 +77,15 @@ impl Executor {
               R: IntoFuture<Item=(), Error=()> + 'static,
     {
         self.spawn(future::lazy(f))
+    }
+}
+
+impl<F> FutureExecutor<F> for Executor
+    where F: Future<Item=(), Error=()> + 'static
+{
+    fn execute(&self, future: F) -> Result<(), ExecuteError<F>> {
+        self.spawn(future);
+        Ok(())
     }
 }
 
