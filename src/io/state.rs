@@ -9,6 +9,7 @@ use glib_sys;
 use io::{IoChannel, IoCondition};
 use {Source, SourceFuncs};
 
+#[derive(Debug)]
 pub enum State {
     NotReady,
     Ready,

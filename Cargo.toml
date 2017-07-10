@@ -9,6 +9,7 @@ futures = "^0.1.14"
 libc = "^0.2.2"
 net2 = "0.2"
 slab = "^0.3.0"
+tokio-core = { path = "/home/bouanto/Telechargements/Source/tokio-core" }
 tokio-io = "0.1"
 winapi = "^0.2.8"
 

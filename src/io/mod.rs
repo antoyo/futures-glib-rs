@@ -9,6 +9,7 @@ use std::ptr;
 use std::str;
 
 use glib_sys;
+use tokio_core::reactor::Core;
 
 use error;
 use Source;
@@ -246,6 +247,34 @@ impl<'a> Write for &'a IoChannel {
             let mut error = 0 as *mut _;
             let r = glib_sys::g_io_channel_flush(self.inner, &mut error);
             rc(r, None, error).map(|_| ())
+        }
+    }
+}
+
+impl From<Core> for IoChannel {
+    #[cfg(unix)]
+    fn from(core: Core) -> IoChannel {
+        use std::os::unix::prelude::*;
+
+        let ptr = unsafe {
+            glib_sys::g_io_channel_unix_new(core.into_raw_fd())
+        };
+        assert!(!ptr.is_null());
+        IoChannel {
+            inner: ptr,
+        }
+    }
+
+    #[cfg(windows)]
+    fn from(core: Core) -> IoChannel {
+        use std::os::windows::prelude::*;
+
+        let ptr = unsafe {
+            g_io_channel_win32_new_socket(core.into_raw_socket() as i32)
+        };
+        assert!(!ptr.is_null());
+        IoChannel {
+            inner: ptr,
         }
     }
 }

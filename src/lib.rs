@@ -6,6 +6,7 @@ extern crate glib_sys;
 extern crate libc;
 extern crate net2;
 extern crate slab;
+extern crate tokio_core;
 #[macro_use]
 extern crate tokio_io;
 #[cfg(windows)]
@@ -13,6 +14,7 @@ extern crate winapi;
 
 #[macro_use]
 mod rt;
+mod core;
 mod future;
 mod interval;
 mod stack;
@@ -31,6 +33,7 @@ use std::time::{Duration, Instant};
 
 use libc::{c_int, c_uint};
 
+pub use core::Core;
 pub use future::{Executor, Remote};
 pub use interval::Interval;
 pub use rt::init;

@@ -1,21 +1,26 @@
 extern crate futures_glib;
 extern crate futures;
+extern crate tokio_core;
 extern crate tokio_io;
 
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::thread;
 
-use futures::Future;
-use futures_glib::net::TcpStream;
-use futures_glib::{MainContext, MainLoop, Executor};
+use futures::{Future, Stream};
+use futures::future::Executor;
+//use futures_glib::net::TcpStream;
+use futures_glib::{Core, MainContext, MainLoop};
+use futures_glib::Executor as Exe;
+use tokio_core::net::TcpStream;
 use tokio_io::io::{read, write_all, read_to_end};
 
 #[test]
 fn smoke() {
     let cx = MainContext::new();
+    let core = Core::new(&cx).unwrap();
     let lp = MainLoop::new(Some(&cx));
-    let ex = Executor::new();
+    let ex = Exe::new();
     ex.attach(&cx);
 
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -32,7 +37,7 @@ fn smoke() {
         assert_eq!(b[4], 0);
     });
 
-    let tcp = TcpStream::connect(&addr, &cx);
+    let tcp = TcpStream::connect(&addr, &core.handle());
     let read = tcp.and_then(|s| {
         read(s, [0; 8])
     });
@@ -47,10 +52,11 @@ fn smoke() {
     });
 
     let lp2 = lp.clone();
-    ex.spawn(done.then(move |_| {
+    core.execute(done.then(move |_| {
         lp2.quit();
         Ok(())
     }));
+    ex.spawn(core.for_each(|_| Ok(())));
 
     lp.run();
     t.join().unwrap();
@@ -62,8 +68,9 @@ fn write_lots() {
     const N: usize = 16 * 1024;
 
     let cx = MainContext::new();
+    let core = Core::new(&cx).unwrap();
     let lp = MainLoop::new(Some(&cx));
-    let ex = Executor::new();
+    let ex = Exe::new();
     ex.attach(&cx);
 
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -84,16 +91,17 @@ fn write_lots() {
         }
     });
 
-    let tcp = TcpStream::connect(&addr, &cx);
+    let tcp = TcpStream::connect(&addr, &core.handle());
     let done = tcp.and_then(|s| {
         write_all(s, vec![1; N])
     });
 
     let lp2 = lp.clone();
-    ex.spawn(done.then(move |_| {
+    core.execute(done.then(move |_| {
         lp2.quit();
         Ok(())
     }));
+    ex.spawn(core.for_each(|_| Ok(())));
 
     lp.run();
     t.join().unwrap();
@@ -105,8 +113,9 @@ fn read_lots() {
     const N: usize = 16 * 1024;
 
     let cx = MainContext::new();
+    let core = Core::new(&cx).unwrap();
     let lp = MainLoop::new(Some(&cx));
-    let ex = Executor::new();
+    let ex = Exe::new();
     ex.attach(&cx);
 
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -120,22 +129,22 @@ fn read_lots() {
         }
     });
 
-    let tcp = TcpStream::connect(&addr, &cx);
+    let tcp = TcpStream::connect(&addr, &core.handle());
     let done = tcp.and_then(|s| {
         read_to_end(s, Vec::new())
     });
 
     let lp2 = lp.clone();
-    ex.spawn(done.map(move |(_s, buf)| {
+    core.execute(done.map(move |(_s, buf)| {
         assert_eq!(buf.len(), N);
         for slot in buf {
             assert_eq!(slot, 1);
         }
         lp2.quit();
     }).map_err(|_| ()));
+    ex.spawn(core.for_each(|_| Ok(())));
 
     lp.run();
     t.join().unwrap();
     ex.destroy();
 }
-
