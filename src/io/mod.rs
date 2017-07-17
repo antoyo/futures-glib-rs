@@ -102,7 +102,7 @@ impl IoChannel {
     ///
     /// Any pending data to be written will be flushed if flush is `true`. The
     /// channel will not be freed until the last reference is dropped.
-    pub fn close(&mut self, flush: bool) -> io::Result<()> {
+    pub fn close(&self, flush: bool) -> io::Result<()> {
         unsafe {
             let mut error = 0 as *mut _;
             let r = glib_sys::g_io_channel_shutdown(self.inner,
@@ -172,8 +172,13 @@ unsafe fn rc(rc: glib_sys::GIOStatus,
             if let Some(amt) = amt {
                 assert_eq!(amt, 0);
             }
-            assert!(!error.is_null());
-            Err(error::new(error).into())
+            if error.is_null() {
+                // FIXME: pre-condition error, not io error.
+                Err(io::Error::last_os_error())
+            }
+            else {
+                Err(error::new(error).into())
+            }
         }
         glib_sys::G_IO_STATUS_NORMAL => {
             assert!(error.is_null());
@@ -334,9 +339,19 @@ impl IoCondition {
         self.flag(output, glib_sys::G_IO_OUT)
     }
 
+    /// Tests whether this condition indicates hang up
+    pub fn is_hang_up(&self) -> bool {
+        self.bits.contains(glib_sys::G_IO_HUP)
+    }
+
     /// Tests whether this condition indicates input readiness
     pub fn is_input(&self) -> bool {
         self.bits.contains(glib_sys::G_IO_IN)
+    }
+
+    /// Tests whether this condition indicates not opened
+    pub fn is_not_open(&self) -> bool {
+        self.bits.contains(glib_sys::G_IO_NVAL)
     }
 
     /// Tests whether this condition indicates output readiness
