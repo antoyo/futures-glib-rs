@@ -96,14 +96,12 @@ impl SourceFuncs for Inner {
             if let Some(task) = self.read.borrow_mut().unblock() {
                 task.notify();
             }
-            active.input(false);
         }
 
         if ready.is_output() {
             if let Some(task) = self.write.borrow_mut().unblock() {
                 task.notify();
             }
-            active.output(false);
         }
 
         // Configure the active set of conditions we're listening for.
