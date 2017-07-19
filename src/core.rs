@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::io;
+#[cfg(unix)]
 use std::os::unix::io::AsRawFd;
 use std::time::{Duration, Instant};
 
@@ -8,7 +9,9 @@ use futures::future::{Executor, ExecuteError};
 use glib_sys;
 use tokio_core::reactor::{self, Handle};
 
-use {MainContext, Source, SourceFuncs, UnixToken};
+#[cfg(unix)]
+use UnixToken;
+use {MainContext, Source, SourceFuncs};
 use io::IoCondition;
 use io::state::State;
 
@@ -19,6 +22,7 @@ pub struct Core {
 impl Core {
     pub fn new(cx: &MainContext) -> Result<Self, io::Error> {
         let core = reactor::Core::new()?;
+        // TODO: windows.
         let fd = core.as_raw_fd();
         let mut active = IoCondition::new();
         active.input(true).output(true);
@@ -33,7 +37,7 @@ impl Core {
         let t = source.unix_add_fd(fd, &active);
         *source.get_ref().token.borrow_mut() = Some(t);
         Ok(Core {
-            source
+            source,
         })
     }
 
@@ -65,6 +69,7 @@ impl Core {
 struct Inner {
     core: RefCell<reactor::Core>,
     active: RefCell<IoCondition>,
+    #[cfg(unix)]
     token: RefCell<Option<UnixToken>>,
     read: RefCell<State>,
     write: RefCell<State>,
