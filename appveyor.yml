@@ -24,6 +24,6 @@ install:
 build_script:
   - mkdir .cargo
   - echo paths = ["."] > .cargo\config
-  - cargo test --verbose -- --nocapture
+  - cargo test -- --nocapture
 
 test: false

@@ -297,13 +297,14 @@ impl From<TcpStream> for IoChannel {
     fn from(socket: TcpStream) -> IoChannel {
         use std::os::windows::prelude::*;
 
-        let ptr = unsafe {
+        unimplemented!()
+        /*let ptr = unsafe {
             g_io_channel_win32_new_socket(socket.into_raw_socket() as i32)
         };
         assert!(!ptr.is_null());
         IoChannel {
             inner: ptr,
-        }
+        }*/
     }
 }
 

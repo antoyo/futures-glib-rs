@@ -16,10 +16,17 @@ use io::IoCondition;
 use io::state::State;
 
 pub struct Core {
+    #[cfg(unix)]
     source: Source<Inner>,
 }
 
 impl Core {
+    #[cfg(windows)]
+    pub fn new(cx: &MainContext) -> Result<Self, io::Error> {
+        Core {}
+    }
+
+    #[cfg(unix)]
     pub fn new(cx: &MainContext) -> Result<Self, io::Error> {
         let core = reactor::Core::new()?;
         // TODO: windows.
@@ -52,12 +59,15 @@ impl Core {
             active.output(true);
         }
 
-        // Be sure to update the IoCondition that we're interested so we can get
-        // events related to this condition.
-        let token = inner.token.borrow();
-        let token = token.as_ref().unwrap();
-        unsafe {
-            self.source.unix_modify_fd(token, &active);
+        #[cfg(unix)]
+        {
+            // Be sure to update the IoCondition that we're interested so we can get
+            // events related to this condition.
+            let token = inner.token.borrow();
+            let token = token.as_ref().unwrap();
+            unsafe {
+                self.source.unix_modify_fd(token, &active);
+            }
         }
     }
 
@@ -91,27 +101,30 @@ impl SourceFuncs for Inner {
                 _fnptr: glib_sys::GSourceFunc,
                 _data: glib_sys::gpointer) -> bool {
         // Learn about how we're ready
-        let token = self.token.borrow();
-        let token = token.as_ref().unwrap();
-        let ready = unsafe { source.unix_query_fd(token) };
-        let mut active = self.active.borrow_mut();
+        #[cfg(unix)]
+        {
+            let token = self.token.borrow();
+            let token = token.as_ref().unwrap();
+            let ready = unsafe { source.unix_query_fd(token) };
+            let mut active = self.active.borrow_mut();
 
-        // Wake up the read/write tasks as appropriate
-        if ready.is_input() {
-            if let Some(task) = self.read.borrow_mut().unblock() {
-                task.notify();
+            // Wake up the read/write tasks as appropriate
+            if ready.is_input() {
+                if let Some(task) = self.read.borrow_mut().unblock() {
+                    task.notify();
+                }
             }
-        }
 
-        if ready.is_output() {
-            if let Some(task) = self.write.borrow_mut().unblock() {
-                task.notify();
+            if ready.is_output() {
+                if let Some(task) = self.write.borrow_mut().unblock() {
+                    task.notify();
+                }
             }
-        }
 
-        // Configure the active set of conditions we're listening for.
-        unsafe {
-            source.unix_modify_fd(token, &active);
+            // Configure the active set of conditions we're listening for.
+            unsafe {
+                source.unix_modify_fd(token, &active);
+            }
         }
         let start = Instant::now();
         self.core.borrow_mut().process(start);
