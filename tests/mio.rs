@@ -9,7 +9,10 @@ use std::time::Duration;
 
 use mio::{Events, Poll, PollOpt, Ready, Token};
 use mio::tcp::TcpStream;
+#[cfg(unix)]
 use mio::unix::EventedFd;
+#[cfg(windows)]
+use mio::windows::EventedFd;
 
 // A token is used to identify an event.
 const EVENT_LOOP: Token = Token(2);
@@ -28,7 +31,10 @@ fn test_recursive_mio() {
     // Register for read event on the socket.
     poll.register(&stream, SOCKET, Ready::readable() | Ready::writable(), PollOpt::edge()).unwrap();
 
+    #[cfg(unix)]
     outer_poll.register(&EventedFd(&poll.as_raw_fd()), EVENT_LOOP, Ready::readable() | Ready::writable(), PollOpt::edge()).unwrap();
+    #[cfg(windows)]
+    outer_poll.register(&EventedFd(&poll.as_raw_handle()), EVENT_LOOP, Ready::readable() | Ready::writable(), PollOpt::edge()).unwrap();
 
     // Create a collection where the ready events will go.
     let mut outer_events = Events::with_capacity(1);
