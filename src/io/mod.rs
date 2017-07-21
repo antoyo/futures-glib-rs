@@ -269,13 +269,14 @@ impl From<Core> for IoChannel {
     fn from(core: Core) -> IoChannel {
         use std::os::windows::prelude::*;
 
-        let ptr = unsafe {
+        unimplemented!();
+        /*let ptr = unsafe {
             g_io_channel_win32_new_socket(core.into_raw_socket() as i32)
         };
         assert!(!ptr.is_null());
         IoChannel {
             inner: ptr,
-        }
+        }*/
     }
 }
 

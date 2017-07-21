@@ -16,14 +16,13 @@ use io::IoCondition;
 use io::state::State;
 
 pub struct Core {
-    #[cfg(unix)]
     source: Source<Inner>,
 }
 
 impl Core {
     #[cfg(windows)]
     pub fn new(cx: &MainContext) -> Result<Self, io::Error> {
-        Core {}
+        unimplemented!();
     }
 
     #[cfg(unix)]
