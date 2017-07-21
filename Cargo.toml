@@ -9,7 +9,6 @@ futures = "^0.1.14"
 libc = "^0.2.2"
 net2 = "0.2"
 slab = "^0.3.0"
-tokio-core = { git = "https://github.com/antoyo/tokio-core" }
 tokio-io = "0.1"
 winapi = "^0.2.8"
 
@@ -17,8 +16,12 @@ winapi = "^0.2.8"
 features = ["v2_36"]
 version = "0.3"
 
+[dependencies.tokio-core]
+git = "https://github.com/antoyo/tokio-core"
+
 [dev-dependencies]
 gtk = "0.1"
+mio = "^0.6.9"
 
 [features]
 nightly = []
