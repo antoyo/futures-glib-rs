@@ -37,7 +37,7 @@ impl Core {
         let t = source.unix_add_fd(fd, &active);
         *source.get_ref().token.borrow_mut() = Some(t);
         Ok(Core {
-            source: source,
+            source,
         })
     }
 

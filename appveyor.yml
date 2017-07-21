@@ -1,4 +1,6 @@
 environment:
+  RUSTUP_USE_HYPER: 1
+  CARGO_HTTP_CHECK_REVOKE: false
   matrix:
     - RUST: 1.19.0
       BITS: 32
