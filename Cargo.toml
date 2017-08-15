@@ -1,6 +1,10 @@
 [package]
-authors = ["Antoni Boucher <bouanto@zoho.com>"]
+authors = ["Antoni Boucher <bouanto@zoho.com>", "Alex Crichton <alex@alexcrichton.com>"]
+categories = ["asynchronous"]
+description = "Spawn futures on the glib event loop"
+license = "MIT"
 name = "futures-glib"
+repository = "https://github.com/antoyo/futures-glib-rs"
 version = "0.1.0"
 
 [dependencies]
