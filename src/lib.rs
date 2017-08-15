@@ -352,8 +352,6 @@ pub struct Source<T> {
     _marker: marker::PhantomData<T>,
 }
 
-unsafe impl<T: Send> Send for Source<T> {}
-
 struct Inner<T> {
     _gsource: glib_sys::GSource,
     funcs: Box<glib_sys::GSourceFuncs>,
@@ -646,9 +644,6 @@ impl<T> Drop for Source<T> {
 /// Tokens returns from `unix_add_fd` to later remove the fd.
 #[cfg(unix)]
 pub struct UnixToken(glib_sys::gpointer);
-
-#[cfg(unix)]
-unsafe impl Send for UnixToken {}
 
 /// Trait for the callbacks that will be invoked by the `Source` type.
 pub trait SourceFuncs: Sized {
