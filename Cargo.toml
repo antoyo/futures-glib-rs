@@ -18,7 +18,7 @@ winapi = "^0.2.8"
 
 [dependencies.glib-sys]
 features = ["v2_36"]
-version = "0.3"
+version = "0.4"
 
 [dev-dependencies]
 gtk = "0.1"
