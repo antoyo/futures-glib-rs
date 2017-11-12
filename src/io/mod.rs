@@ -4,6 +4,9 @@ use std::ffi::{CStr, CString};
 use std::io::{self, Read, Write};
 #[cfg(unix)]
 use std::os::unix::io::RawFd;
+#[cfg(windows)]
+use std::os::windows::io::RawSocket;
+
 use std::net::TcpStream;
 use std::ptr;
 use std::str;
@@ -24,6 +27,16 @@ impl IoChannel {
     #[cfg(unix)]
     pub unsafe fn unix_new(fd: RawFd) -> Self {
         let ptr = glib_sys::g_io_channel_unix_new(fd);
+
+        assert!(!ptr.is_null());
+        IoChannel {
+            inner: ptr,
+        }
+    }
+
+    #[cfg(windows)]
+    pub unsafe fn windows_new(socket: RawSocket) -> Self {
+        g_io_channel_win32_new_socket(socket as i32);
 
         assert!(!ptr.is_null());
         IoChannel {
@@ -257,26 +270,14 @@ impl From<TcpStream> for IoChannel {
     fn from(socket: TcpStream) -> IoChannel {
         use std::os::unix::prelude::*;
 
-        let ptr = unsafe {
-            glib_sys::g_io_channel_unix_new(socket.into_raw_fd())
-        };
-        assert!(!ptr.is_null());
-        IoChannel {
-            inner: ptr,
-        }
+        unsafe { IoChannel::unix_new(socket.into_raw_fd()) }
     }
 
     #[cfg(windows)]
     fn from(socket: TcpStream) -> IoChannel {
         use std::os::windows::prelude::*;
 
-        let ptr = unsafe {
-            g_io_channel_win32_new_socket(socket.into_raw_socket() as i32)
-        };
-        assert!(!ptr.is_null());
-        IoChannel {
-            inner: ptr,
-        }
+        unsafe { IoChannel::windows_new(socket.into_raw_socket()) }
     }
 }
 
