@@ -268,7 +268,7 @@ impl Remote {
               R: IntoFuture<Item=(), Error=()>,
               R::Future: 'static
     {
-        self.tx.send(Run(Box::new(|source: &Source<Inner>| {
+        self.tx.unbounded_send(Run(Box::new(|source: &Source<Inner>| {
             let inner = source.get_ref();
             let f = f(Executor {
                 source: source.clone(),
