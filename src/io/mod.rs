@@ -20,14 +20,11 @@ pub struct IoChannel {
     inner: *mut glib_sys::GIOChannel,
 }
 
-unsafe impl Send for IoChannel {} // FIXME: probably wrong
-
 impl IoChannel {
     #[cfg(unix)]
-    pub fn unix_new(fd: RawFd) -> Self {
-        let ptr = unsafe {
-            glib_sys::g_io_channel_unix_new(fd)
-        };
+    pub unsafe fn unix_new(fd: RawFd) -> Self {
+        let ptr = glib_sys::g_io_channel_unix_new(fd);
+
         assert!(!ptr.is_null());
         IoChannel {
             inner: ptr,
