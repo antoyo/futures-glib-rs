@@ -5,7 +5,7 @@ description = "Spawn futures on the glib event loop"
 license = "MIT"
 name = "futures-glib"
 repository = "https://github.com/antoyo/futures-glib-rs"
-version = "0.2.1"
+version = "0.3.0"
 
 [dependencies]
 bytes = "^0.4.2"
@@ -18,7 +18,7 @@ winapi = "^0.2.8"
 
 [dependencies.glib-sys]
 features = ["v2_36"]
-version = "0.4"
+version = "0.5"
 
 [dev-dependencies]
 gtk = "0.2"

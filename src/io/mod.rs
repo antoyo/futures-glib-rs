@@ -208,6 +208,7 @@ unsafe fn rc(rc: glib_sys::GIOStatus,
             assert!(error.is_null());
             Err(io::Error::from(io::ErrorKind::WouldBlock))
         }
+        _ => panic!("Unexpected error {}", rc),
     }
 }
 
