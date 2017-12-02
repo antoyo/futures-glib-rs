@@ -36,7 +36,7 @@ impl IoChannel {
 
     #[cfg(windows)]
     pub unsafe fn windows_new(socket: RawSocket) -> Self {
-        g_io_channel_win32_new_socket(socket as i32);
+        let ptr = g_io_channel_win32_new_socket(socket as i32);
 
         assert!(!ptr.is_null());
         IoChannel {
