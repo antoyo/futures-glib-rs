@@ -136,7 +136,7 @@ impl SourceFuncs for Inner {
             match res {
                 Ok(Async::NotReady) => { queue[index].future = Some(task); }
                 Ok(Async::Ready(())) |
-                Err(()) => { queue.remove(index).unwrap(); }
+                Err(()) => { queue.remove(index); }
             }
         }
         loop {
@@ -195,8 +195,8 @@ impl Inner {
         let (tx, rx) = mpsc::unbounded();
         let mut queue = Slab::with_capacity(128);
         let id = {
-            let entry = queue.vacant_entry().unwrap();
-            let index = entry.index();
+            let entry = queue.vacant_entry();
+            let index = entry.key();
             entry.insert(Task {
                 notifier: None,
                 future: None,
@@ -217,12 +217,8 @@ impl Inner {
 
     fn spawn<F: Future<Item=(), Error=()> + 'static>(&self, future: F, source: &Source<Inner>) {
         let mut queue = self.queue.borrow_mut();
-        if queue.vacant_entry().is_none() {
-            let len = queue.len();
-            queue.reserve_exact(len);
-        }
-        let entry = queue.vacant_entry().unwrap();
-        let index = entry.index();
+        let entry = queue.vacant_entry();
+        let index = entry.key();
         entry.insert(Task {
             notifier: None,
             future: Some(spawn(Box::new(future))),

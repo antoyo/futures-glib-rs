@@ -5,14 +5,14 @@ description = "Spawn futures on the glib event loop"
 license = "MIT"
 name = "futures-glib"
 repository = "https://github.com/antoyo/futures-glib-rs"
-version = "0.3.1"
+version = "0.3.2"
 
 [dependencies]
 bytes = "^0.4.2"
 futures = "^0.1.14"
 libc = "^0.2.2"
 net2 = "0.2"
-slab = "^0.3.0"
+slab = "^0.4.0"
 tokio-io = "0.1"
 winapi = "^0.2.8"
 
