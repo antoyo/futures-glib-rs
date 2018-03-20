@@ -14,14 +14,14 @@ libc = "^0.2.2"
 net2 = "0.2"
 slab = "^0.4.0"
 tokio-io = "0.1"
-winapi = "^0.2.8"
+winapi = "^0.3.4"
 
 [dependencies.glib-sys]
 features = ["v2_36"]
-version = "0.5"
+version = "0.6"
 
 [dev-dependencies]
-gtk = "0.3"
+gtk = "0.4"
 
 [features]
 nightly = []
