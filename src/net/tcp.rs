@@ -10,7 +10,7 @@ use futures::task;
 #[cfg(unix)]
 use libc::EINPROGRESS;
 #[cfg(windows)]
-use winapi::WSAEINPROGRESS as EINPROGRESS;
+use winapi::shared::winerror::WSAEINPROGRESS as EINPROGRESS;
 
 use futures::{Future, Poll, Async};
 use glib_sys;
